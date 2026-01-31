@@ -29,7 +29,7 @@
 	"exports": "./dist/index.mjs",
 	"types": "./dist/index.d.mts",
 	"engines": {
-		"node": ">=22"
+		"node": ">=20"
 	},
 	"packageManager": "pnpm@10.28.2",
 	"peerDependencies": {
@@ -37,7 +37,7 @@
 	},
 	"devDependencies": {
 		"@standard-config/eslint": "1.2.1",
-		"@standard-config/prettier": "1.7.0",
+		"@standard-config/prettier": "1.8.0",
 		"@standard-config/tsconfig": "2.0.2",
 		"@vitest/coverage-v8": "4.0.18",
 		"eslint": "9.39.2",
