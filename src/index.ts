@@ -1,10 +1,10 @@
 import type { Plugin } from 'prettier';
 import type { AST } from './types/index.d.ts';
-import { format } from 'prettier';
 import {
 	parsers as markdownParsers,
 	printers as markdownPrinters,
 } from 'prettier/plugins/markdown';
+import formatHTML from './format-html/index.ts';
 
 export const parsers: Plugin['parsers'] = {
 	markdown: markdownParsers.markdown,
@@ -25,31 +25,8 @@ export const printers: Plugin['printers'] = {
 					? await preprocess(ast, options)
 					: ast;
 
-			const {
-				bracketSameLine,
-				endOfLine,
-				htmlWhitespaceSensitivity,
-				printWidth,
-				singleAttributePerLine,
-				tabWidth,
-				useTabs,
-			} = options;
-
 			await mutateHTMLNodes(root, async (node) => {
-				try {
-					const html = await format(node.value, {
-						parser: 'html',
-						bracketSameLine,
-						endOfLine,
-						htmlWhitespaceSensitivity,
-						printWidth,
-						singleAttributePerLine,
-						tabWidth,
-						useTabs,
-					});
-
-					node.value = html.trim();
-				} catch {}
+				node.value = await formatHTML(node.value, options);
 			});
 
 			return root;

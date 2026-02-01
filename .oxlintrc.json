@@ -298,6 +298,7 @@
 				"typescript/no-unsafe-assignment": "off",
 				"typescript/no-unsafe-member-access": "off",
 				"unicorn/consistent-function-scoping": "off",
+				"unicorn/error-message": "off",
 				"unicorn/no-empty-file": "off",
 				"vitest/no-conditional-tests": "off",
 				"vitest/prefer-to-be-falsy": "off",
