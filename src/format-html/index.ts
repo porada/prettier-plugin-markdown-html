@@ -5,13 +5,22 @@ export default async function formatHTML(
 	text: string,
 	options?: Options | ParserOptions
 ): Promise<string> {
-	const { filepath } = options ?? {};
+	/* oxlint-disable-next-line eslint/no-param-reassign */
+	options = omitParserOptions(options);
+
+	const {
+		filepath,
+		htmlFragmentSingleAttributePerLine: singleAttributePerLine,
+	} = options;
 
 	try {
 		const formatted = await format(text, {
 			parser: 'html',
 			filepath: `${filepath ?? 'prettier-plugin-markdown-html'}.html`,
-			...omitParserOptions(options),
+			...options,
+			...(singleAttributePerLine !== undefined && {
+				singleAttributePerLine,
+			}),
 		});
 
 		return formatted.trim();

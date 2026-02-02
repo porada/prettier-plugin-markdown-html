@@ -1,4 +1,5 @@
 import type { Plugin } from 'prettier';
+import type { PluginOptions } from './index.ts';
 import { format } from 'prettier';
 import { expect, expectTypeOf, test } from 'vitest';
 import * as pluginMarkdownHTML from './index.ts';
@@ -11,6 +12,8 @@ test('exposes correct public API', () => {
 
 	expect(pluginMarkdownHTML).toHaveProperty('printers');
 	expect(pluginMarkdownHTML.printers).toHaveProperty('mdast');
+
+	expectTypeOf<PluginOptions>().toBeObject();
 });
 
 const TEST_MARKDOWN = `
@@ -115,6 +118,22 @@ test('respects `useTabs`', async () => {
 	});
 
 	expect(output).toMatchSnapshot();
+});
+
+test('supports `htmlFragmentSingleAttributePerLine`', async () => {
+	for (const [htmlFragmentSingleAttributePerLine, singleAttributePerLine] of [
+		[true, false],
+		[false, true],
+	] as const) {
+		const output = await format(TEST_MARKDOWN, {
+			parser: 'markdown',
+			plugins: [pluginMarkdownHTML],
+			htmlFragmentSingleAttributePerLine,
+			singleAttributePerLine,
+		});
+
+		expect(output).toMatchSnapshot();
+	}
 });
 
 test('handles empty files', async () => {

@@ -310,3 +310,126 @@ Comes without any additional dependencies.
 \`\`\`
 "
 `;
+
+exports[`supports \`htmlFragmentSingleAttributePerLine\` 1`] = `
+"<p align="center">
+  <a href="#">
+    <picture>
+      <source
+        srcset="#"
+        media="(prefers-color-scheme: dark)"
+      />
+      <source
+        srcset="#"
+        media="(prefers-color-scheme: light)"
+      />
+      <img
+        src="#"
+        width="520"
+        alt=""
+      />
+    </picture>
+  </a>
+</p>
+
+<h1 align="center">prettier-plugin-markdown-html</h1>
+
+<br />
+
+## Description
+
+<p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
+
+Comes without any additional dependencies.
+
+<p align="center">
+  <a href="#"
+    ><img
+      src="#"
+      alt=""
+  /></a>
+  <a href="#"
+    ><img
+      src="#"
+      alt=""
+  /></a>
+  <a href="#"
+    ><img
+      src="#"
+      alt=""
+  /></a>
+</p>
+<p>
+  <a href="#"
+    ><img
+      src="#"
+      alt=""
+  /></a>
+</p>
+
+<!-- <p><a href="#">
+<img src="#" alt="" /></a></p> -->
+
+<div>&nbsp;</div>
+
+## Example
+
+\`\`\`html
+<p align="center">
+  <a href="#">
+    <img src="#" alt="" />
+  </a>
+</p>
+\`\`\`
+"
+`;
+
+exports[`supports \`htmlFragmentSingleAttributePerLine\` 2`] = `
+"<p align="center">
+  <a href="#">
+    <picture>
+      <source srcset="#" media="(prefers-color-scheme: dark)" />
+      <source srcset="#" media="(prefers-color-scheme: light)" />
+      <img src="#" width="520" alt="" />
+    </picture>
+  </a>
+</p>
+
+<h1 align="center">prettier-plugin-markdown-html</h1>
+
+<br />
+
+## Description
+
+<p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
+
+Comes without any additional dependencies.
+
+<p align="center">
+  <a href="#"><img src="#" alt="" /></a>
+  <a href="#"><img src="#" alt="" /></a>
+  <a href="#"><img src="#" alt="" /></a>
+</p>
+<p>
+  <a href="#"><img src="#" alt="" /></a>
+</p>
+
+<!-- <p><a href="#">
+<img src="#" alt="" /></a></p> -->
+
+<div>&nbsp;</div>
+
+## Example
+
+\`\`\`html
+<p align="center">
+  <a href="#">
+    <img
+      src="#"
+      alt=""
+    />
+  </a>
+</p>
+\`\`\`
+"
+`;

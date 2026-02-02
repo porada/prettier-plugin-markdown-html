@@ -1,5 +1,5 @@
 import type { Plugin } from 'prettier';
-import type { AST } from './types/index.d.ts';
+import type { AST, PluginOptions } from './types/index.d.ts';
 import {
 	parsers as markdownParsers,
 	printers as markdownPrinters,
@@ -33,6 +33,17 @@ export const printers: Plugin['printers'] = {
 		},
 	},
 };
+
+export const options: Plugin['options'] = {
+	htmlFragmentSingleAttributePerLine: {
+		category: 'Output',
+		description:
+			'Enforce one HTML attribute per line for raw HTML fragments in Markdown.',
+		type: 'boolean',
+	},
+};
+
+export type { PluginOptions };
 
 async function mutateHTMLNodes(
 	node: AST.Node,

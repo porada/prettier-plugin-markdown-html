@@ -52,6 +52,22 @@ Reference `prettier-plugin-markdown-html` in your [Prettier config](https://pret
 }
 ```
 
+## Options
+
+In addition to Prettier’s [built-in options](https://prettier.io/docs/options) that affect HTML formatting, `prettier-plugin-markdown-html` offers additional configuration options.
+
+```ts
+interface PluginOptions {
+    /**
+     * Enforce one HTML attribute per line for raw HTML fragments in Markdown.
+     * Unlike `singleAttributePerLine`, this option does not affect code blocks.
+     * Falls back to `singleAttributePerLine` when unset.
+     * @default undefined
+     */
+    htmlFragmentSingleAttributePerLine?: boolean | undefined;
+}
+```
+
 ## Related
 
 - [**@standard-config/prettier**](https://github.com/standard-config/prettier)
