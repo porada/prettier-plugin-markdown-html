@@ -12,6 +12,7 @@ export default async function formatHTML(
 		filepath,
 		htmlFragmentPrintWidth: printWidth,
 		htmlFragmentSingleAttributePerLine: singleAttributePerLine,
+		htmlFragmentWhitespaceSensitivity: htmlWhitespaceSensitivity,
 	} = options;
 
 	try {
@@ -19,6 +20,9 @@ export default async function formatHTML(
 			parser: 'html',
 			filepath: `${filepath ?? 'prettier-plugin-markdown-html'}.html`,
 			...options,
+			...(typeof htmlWhitespaceSensitivity === 'string' && {
+				htmlWhitespaceSensitivity,
+			}),
 			...(typeof printWidth === 'number' && {
 				printWidth,
 			}),

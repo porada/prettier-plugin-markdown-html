@@ -72,6 +72,13 @@ interface PluginOptions {
      * @default undefined
      */
     htmlFragmentSingleAttributePerLine?: boolean | undefined;
+    /**
+     * Control whitespace handling for raw HTML fragments in Markdown. Unlike
+     * `htmlWhitespaceSensitivity`, this option does not affect code blocks.
+     * Falls back to `htmlWhitespaceSensitivity` when unset.
+     * @default undefined
+     */
+    htmlFragmentWhitespaceSensitivity?: 'css' | 'strict' | 'ignore' | undefined;
 }
 ```
 

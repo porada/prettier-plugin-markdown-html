@@ -78,6 +78,16 @@ test('formats raw HTML in Markdown', async () => {
 	expect(output).toMatchSnapshot();
 });
 
+test('respects `htmlWhitespaceSensitivity`', async () => {
+	const output = await format(TEST_MARKDOWN, {
+		parser: 'markdown',
+		plugins: [pluginMarkdownHTML],
+		htmlWhitespaceSensitivity: 'strict',
+	});
+
+	expect(output).toMatchSnapshot();
+});
+
 test('respects `printWidth`', async () => {
 	const output = await format(TEST_MARKDOWN, {
 		parser: 'markdown',
@@ -145,6 +155,17 @@ test('supports `htmlFragmentSingleAttributePerLine`', async () => {
 
 		expect(output).toMatchSnapshot();
 	}
+});
+
+test('supports `htmlFragmentWhitespaceSensitivity`', async () => {
+	const output = await format(TEST_MARKDOWN, {
+		parser: 'markdown',
+		plugins: [pluginMarkdownHTML],
+		htmlFragmentWhitespaceSensitivity: 'css',
+		htmlWhitespaceSensitivity: 'strict',
+	});
+
+	expect(output).toMatchSnapshot();
 });
 
 test('handles empty files', async () => {

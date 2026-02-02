@@ -12,6 +12,9 @@ test('exposes valid types', () => {
 	expectTypeOf<PluginOptions>().toHaveProperty(
 		'htmlFragmentSingleAttributePerLine'
 	);
+	expectTypeOf<PluginOptions>().toHaveProperty(
+		'htmlFragmentWhitespaceSensitivity'
+	);
 });
 
 test('extends Prettier’s `Options`', () => {
@@ -21,5 +24,8 @@ test('extends Prettier’s `Options`', () => {
 	expectTypeOf<PrettierOptions>().toHaveProperty('htmlFragmentPrintWidth');
 	expectTypeOf<PrettierOptions>().toHaveProperty(
 		'htmlFragmentSingleAttributePerLine'
+	);
+	expectTypeOf<PrettierOptions>().toHaveProperty(
+		'htmlFragmentWhitespaceSensitivity'
 	);
 });
