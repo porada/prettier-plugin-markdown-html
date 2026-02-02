@@ -10,6 +10,7 @@ export default async function formatHTML(
 
 	const {
 		filepath,
+		htmlFragmentPrintWidth: printWidth,
 		htmlFragmentSingleAttributePerLine: singleAttributePerLine,
 	} = options;
 
@@ -18,6 +19,9 @@ export default async function formatHTML(
 			parser: 'html',
 			filepath: `${filepath ?? 'prettier-plugin-markdown-html'}.html`,
 			...options,
+			...(typeof printWidth === 'number' && {
+				printWidth,
+			}),
 			...(singleAttributePerLine !== undefined && {
 				singleAttributePerLine,
 			}),

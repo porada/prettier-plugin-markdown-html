@@ -62,7 +62,7 @@ Comes without any additional dependencies.
 <p align="center">
 
 <a href="#">
-	<img src="#" alt="" />
+	<img src="#" alt="" title="Format raw HTML in Markdown with Prettier" />
 </a>
 
 </p>
@@ -115,6 +115,17 @@ test('respects `useTabs`', async () => {
 		parser: 'markdown',
 		plugins: [pluginMarkdownHTML],
 		useTabs: true,
+	});
+
+	expect(output).toMatchSnapshot();
+});
+
+test('supports `htmlFragmentPrintWidth`', async () => {
+	const output = await format(TEST_MARKDOWN, {
+		parser: 'markdown',
+		plugins: [pluginMarkdownHTML],
+		htmlFragmentPrintWidth: 80,
+		printWidth: 40,
 	});
 
 	expect(output).toMatchSnapshot();

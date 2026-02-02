@@ -35,6 +35,12 @@ export const printers: Plugin['printers'] = {
 };
 
 export const options: Plugin['options'] = {
+	htmlFragmentPrintWidth: {
+		category: 'Output',
+		description:
+			'Override the preferred line length for raw HTML fragments in Markdown.',
+		type: 'int',
+	},
 	htmlFragmentSingleAttributePerLine: {
 		category: 'Output',
 		description:

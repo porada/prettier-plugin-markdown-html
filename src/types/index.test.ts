@@ -8,6 +8,7 @@ test('exposes valid types', () => {
 	expectTypeOf<AST.HTMLNode>().toBeObject();
 
 	expectTypeOf<PluginOptions>().toBeObject();
+	expectTypeOf<PluginOptions>().toHaveProperty('htmlFragmentPrintWidth');
 	expectTypeOf<PluginOptions>().toHaveProperty(
 		'htmlFragmentSingleAttributePerLine'
 	);
@@ -17,6 +18,7 @@ test('extends Prettier’s `Options`', () => {
 	expectTypeOf<PrettierOptions>().toBeObject();
 	expectTypeOf<PrettierOptions>().toHaveProperty('useTabs');
 
+	expectTypeOf<PrettierOptions>().toHaveProperty('htmlFragmentPrintWidth');
 	expectTypeOf<PrettierOptions>().toHaveProperty(
 		'htmlFragmentSingleAttributePerLine'
 	);
