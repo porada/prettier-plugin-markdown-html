@@ -1,3 +1,19 @@
+<p align="center">
+    <a href="https://github.com/porada/prettier-plugin-markdown-html">
+        <picture>
+            <source
+                srcset="assets/prettier-plugin-markdown-html@3x.png"
+                media="(prefers-color-scheme: light)"
+            />
+            <img
+                src="assets/prettier-plugin-markdown-html@3x.png"
+                width="520"
+                alt=""
+            />
+        </picture>
+    </a>
+</p>
+
 <h1 align="center">prettier-plugin-markdown&#8209;html</h1>
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
