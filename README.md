@@ -1,3 +1,23 @@
+<p align="center">
+    <a href="https://github.com/porada/prettier-plugin-markdown-html">
+        <picture>
+            <source
+                srcset="https://github.com/porada/prettier-plugin-markdown-html/blob/main/assets/prettier-plugin-markdown-html-dark-scheme@3x.png?raw=true"
+                media="(prefers-color-scheme: dark)"
+            />
+            <source
+                srcset="https://github.com/porada/prettier-plugin-markdown-html/blob/main/assets/prettier-plugin-markdown-html-light-scheme@3x.png?raw=true"
+                media="(prefers-color-scheme: light)"
+            />
+            <img
+                src="https://github.com/porada/prettier-plugin-markdown-html/blob/main/assets/prettier-plugin-markdown-html-light-scheme@3x.png?raw=true"
+                width="520"
+                alt=""
+            />
+        </picture>
+    </a>
+</p>
+
 <h1 align="center">prettier-plugin-markdown&#8209;html</h1>
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
