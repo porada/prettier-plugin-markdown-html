@@ -2,11 +2,15 @@
     <a href="https://github.com/porada/prettier-plugin-markdown-html">
         <picture>
             <source
-                srcset="assets/prettier-plugin-markdown-html@3x.png"
+                srcset="assets/prettier-plugin-markdown-html-dark-scheme@3x.png"
+                media="(prefers-color-scheme: dark)"
+            />
+            <source
+                srcset="assets/prettier-plugin-markdown-html-light-scheme@3x.png"
                 media="(prefers-color-scheme: light)"
             />
             <img
-                src="assets/prettier-plugin-markdown-html@3x.png"
+                src="assets/prettier-plugin-markdown-html-light-scheme@3x.png"
                 width="520"
                 alt=""
             />
