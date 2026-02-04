@@ -17,9 +17,11 @@ export default async function formatHTML(
 
 	try {
 		const formatted = await format(text, {
-			parser: 'html',
-			filepath: `${filepath ?? 'prettier-plugin-markdown-html'}.html`,
 			...options,
+
+			filepath: `${filepath ?? 'prettier-plugin-markdown-html'}.html`,
+			parser: 'html',
+
 			...(typeof htmlWhitespaceSensitivity === 'string' && {
 				htmlWhitespaceSensitivity,
 			}),
@@ -49,7 +51,6 @@ function omitParserOptions(
 		__embeddedInHtml,
 		astFormat,
 		cursorOffset,
-		filepath,
 		getVisitorKeys,
 		locEnd,
 		locStart,

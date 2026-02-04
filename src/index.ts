@@ -4,7 +4,7 @@ import {
 	parsers as markdownParsers,
 	printers as markdownPrinters,
 } from 'prettier/plugins/markdown';
-import formatHTML from './format-html/index.ts';
+import preprocessMarkdown from './preprocess-markdown/index.ts';
 
 export const parsers: Plugin['parsers'] = {
 	markdown: markdownParsers.markdown,
@@ -25,11 +25,7 @@ export const printers: Plugin['printers'] = {
 					? await preprocess(ast, options)
 					: ast;
 
-			await mutateHTMLNodes(root, async (node) => {
-				node.value = await formatHTML(node.value, options);
-			});
-
-			return root;
+			return preprocessMarkdown(root, options);
 		},
 	},
 };
@@ -47,45 +43,26 @@ export const options: Plugin['options'] = {
 			'Enforce one HTML attribute per line for raw HTML fragments in Markdown.',
 		type: 'boolean',
 	},
+	htmlFragmentWhitespaceSensitivity: {
+		category: 'Output',
+		description:
+			'Control whitespace handling for raw HTML fragments in Markdown.',
+		type: 'choice',
+		choices: [
+			{
+				value: 'css',
+				description: 'Respect CSS display property value.',
+			},
+			{
+				value: 'strict',
+				description: 'Consider whitespace sensitive.',
+			},
+			{
+				value: 'ignore',
+				description: 'Consider whitespace insensitive.',
+			},
+		],
+	},
 };
 
 export type { PluginOptions };
-
-async function mutateHTMLNodes(
-	node: AST.Node,
-	mutate: (node: AST.HTMLNode) => Promise<void>
-) {
-	/* v8 ignore next -- @preserve */
-	if (node.type !== 'root' || !Array.isArray(node.children)) {
-		return;
-	}
-
-	const children: AST.Node[] = [];
-
-	// Merge consecutive HTML nodes
-	for (const child of node.children) {
-		const lastChild = children.at(-1);
-
-		if (isHTMLNode(lastChild) && isHTMLNode(child)) {
-			lastChild.value = `${lastChild.value}\n\n${child.value}`;
-			continue;
-		}
-
-		children.push(child);
-	}
-
-	// Process HTML nodes
-	node.children = await Promise.all(
-		children.map(async (child) => {
-			if (isHTMLNode(child)) {
-				await mutate(child);
-			}
-
-			return child;
-		})
-	);
-}
-
-function isHTMLNode(node: AST.Node | undefined): node is AST.HTMLNode {
-	return node?.type === 'html' && typeof node.value === 'string';
-}

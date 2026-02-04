@@ -29,19 +29,40 @@ declare module 'prettier' {
 }
 
 export namespace AST {
+	export type Point = {
+		column: number;
+		line: number;
+		offset?: number;
+	};
+
+	export type Position = {
+		end: Point;
+		start: Point;
+	};
+
 	export type Node = {
 		children?: Node[];
+		position?: Position;
 		type?: string;
 		value?: string;
 	};
 
-	export type RootNode = {
-		children: Node[];
-		type: 'root';
-	};
-
-	export type HTMLNode = {
+	export type HTMLNode = Node & {
 		type: 'html';
 		value: string;
+	};
+
+	export type HTMLGroup = {
+		children: HTMLNode[];
+		value: string;
+	};
+
+	export type ParentNode = Node & {
+		children: Node[];
+	};
+
+	export type RootNode = Node & {
+		children: Node[];
+		type: 'root';
 	};
 }

@@ -13,10 +13,12 @@
 		"url": "git+https://github.com/porada/prettier-plugin-markdown-html.git"
 	},
 	"keywords": [
-		"embedded-html",
 		"formatting",
+		"gfm",
+		"github-flavored-markdown",
 		"html",
 		"markdown",
+		"markdown-html",
 		"md",
 		"prettier",
 		"prettier-plugin"

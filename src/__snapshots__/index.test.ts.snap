@@ -13,8 +13,6 @@ exports[`formats raw HTML in Markdown 1`] = `
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
 
-<br />
-
 ## Description
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
@@ -37,6 +35,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details><summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
   <a href="#">
@@ -44,6 +44,10 @@ Comes without any additional dependencies.
   </a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;
 
@@ -59,8 +63,6 @@ exports[`respects \`htmlWhitespaceSensitivity\` 1`] = `
 </p>
 
 <h1 align="center"> prettier-plugin-markdown-html </h1>
-
-<br />
 
 ## Description
 
@@ -84,6 +86,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details> <summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
   <a href="#">
@@ -91,6 +95,10 @@ Comes without any additional dependencies.
   </a>
 </p>
 \`\`\`
+
+</details>
+
+<div> &nbsp; </div>
 "
 `;
 
@@ -106,8 +114,6 @@ exports[`respects \`printWidth\` 1`] = `
 </p>
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
-
-<br />
 
 ## Description
 
@@ -131,6 +137,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details><summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
   <a href="#">
@@ -138,6 +146,10 @@ Comes without any additional dependencies.
   </a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;
 
@@ -164,8 +176,6 @@ exports[`respects \`singleAttributePerLine\` 1`] = `
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
 
-<br />
-
 ## Description
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
@@ -204,6 +214,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details><summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
   <a href="#">
@@ -215,6 +227,10 @@ Comes without any additional dependencies.
   </a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;
 
@@ -231,8 +247,6 @@ exports[`respects \`singleAttributePerLine\` 2`] = `
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
 
-<br />
-
 ## Description
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
@@ -255,6 +269,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details><summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
   <a href="#">
@@ -262,6 +278,10 @@ Comes without any additional dependencies.
   </a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;
 
@@ -278,8 +298,6 @@ exports[`respects \`tabWidth\` 1`] = `
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
 
-<br />
-
 ## Description
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
@@ -302,6 +320,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details><summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
     <a href="#">
@@ -309,6 +329,10 @@ Comes without any additional dependencies.
     </a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;
 
@@ -325,8 +349,6 @@ exports[`respects \`useTabs\` 1`] = `
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
 
-<br />
-
 ## Description
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
@@ -349,6 +371,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details><summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
 	<a href="#">
@@ -356,6 +380,10 @@ Comes without any additional dependencies.
 	</a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;
 
@@ -372,8 +400,6 @@ exports[`supports \`htmlFragmentPrintWidth\` 1`] = `
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
 
-<br />
-
 ## Description
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
@@ -396,6 +422,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details><summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
   <a href="#">
@@ -407,6 +435,10 @@ Comes without any additional dependencies.
   </a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;
 
@@ -433,8 +465,6 @@ exports[`supports \`htmlFragmentSingleAttributePerLine\` 1`] = `
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
 
-<br />
-
 ## Description
 
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
@@ -473,6 +503,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details><summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
   <a href="#">
@@ -480,6 +512,10 @@ Comes without any additional dependencies.
   </a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;
 
@@ -496,7 +532,60 @@ exports[`supports \`htmlFragmentSingleAttributePerLine\` 2`] = `
 
 <h1 align="center">prettier-plugin-markdown-html</h1>
 
-<br />
+## Description
+
+<p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
+
+Comes without any additional dependencies.
+
+<p align="center">
+  <a href="#"><img src="#" alt="" /></a>
+  <a href="#"><img src="#" alt="" /></a>
+  <a href="#"><img src="#" alt="" /></a>
+</p>
+<p>
+  <a href="#"><img src="#" alt="" /></a>
+</p>
+
+<!-- <p><a href="#">
+<img src="#" alt="" /></a></p> -->
+
+<div>&nbsp;</div>
+
+## Example
+
+<details><summary>Show example</summary>
+
+\`\`\`html
+<p align="center">
+  <a href="#">
+    <img
+      src="#"
+      alt=""
+      title="Format raw HTML in Markdown with Prettier"
+    />
+  </a>
+</p>
+\`\`\`
+
+</details>
+
+<div>&nbsp;</div>
+"
+`;
+
+exports[`supports \`htmlFragmentWhitespaceSensitivity\` 1`] = `
+"<p align="center">
+  <a href="#">
+    <picture>
+      <source srcset="#" media="(prefers-color-scheme: dark)" />
+      <source srcset="#" media="(prefers-color-scheme: light)" />
+      <img src="#" width="520" alt="" />
+    </picture>
+  </a>
+</p>
+
+<h1 align="center">prettier-plugin-markdown-html</h1>
 
 ## Description
 
@@ -520,56 +609,7 @@ Comes without any additional dependencies.
 
 ## Example
 
-\`\`\`html
-<p align="center">
-  <a href="#">
-    <img
-      src="#"
-      alt=""
-      title="Format raw HTML in Markdown with Prettier"
-    />
-  </a>
-</p>
-\`\`\`
-"
-`;
-
-exports[`supports \`htmlFragmentWhitespaceSensitivity\` 1`] = `
-"<p align="center">
-  <a href="#">
-    <picture>
-      <source srcset="#" media="(prefers-color-scheme: dark)" />
-      <source srcset="#" media="(prefers-color-scheme: light)" />
-      <img src="#" width="520" alt="" />
-    </picture>
-  </a>
-</p>
-
-<h1 align="center"> prettier-plugin-markdown-html </h1>
-
-<br />
-
-## Description
-
-<p align="center"> Format raw HTML in&nbsp;Markdown with&nbsp;Prettier. </p>
-
-Comes without any additional dependencies.
-
-<p align="center">
-  <a href="#"><img src="#" alt="" /></a>
-  <a href="#"><img src="#" alt="" /></a>
-  <a href="#"><img src="#" alt="" /></a>
-</p>
-<p
-  ><a href="#"><img src="#" alt="" /></a
-></p>
-
-<!-- <p><a href="#">
-<img src="#" alt="" /></a></p> -->
-
-<div> &nbsp; </div>
-
-## Example
+<details><summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -578,5 +618,9 @@ Comes without any additional dependencies.
   </a>
 </p>
 \`\`\`
+
+</details>
+
+<div>&nbsp;</div>
 "
 `;

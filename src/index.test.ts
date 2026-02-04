@@ -27,11 +27,10 @@ const TEST_MARKDOWN = `
     </a>
 </p>
 
+
 <h1 align="center">
     prettier-plugin-markdown-html
 </h1>
-
-<br />
 
 ## Description
 
@@ -58,6 +57,8 @@ Comes without any additional dependencies.
 
 ## Example
 
+<details> <summary>Show example</summary>
+
 \`\`\`html
 <p align="center">
 
@@ -67,6 +68,11 @@ Comes without any additional dependencies.
 
 </p>
 \`\`\`
+
+</details>
+<div>
+&nbsp;
+</div>
 `;
 
 test('formats raw HTML in Markdown', async () => {

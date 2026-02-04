@@ -4,8 +4,14 @@ import { expectTypeOf, test } from 'vitest';
 
 test('exposes valid types', () => {
 	expectTypeOf<AST.Node>().toBeObject();
+	expectTypeOf<AST.ParentNode>().toBeObject();
 	expectTypeOf<AST.RootNode>().toBeObject();
+
 	expectTypeOf<AST.HTMLNode>().toBeObject();
+	expectTypeOf<AST.HTMLGroup>().toBeObject();
+
+	expectTypeOf<AST.Point>().toBeObject();
+	expectTypeOf<AST.Position>().toBeObject();
 
 	expectTypeOf<PluginOptions>().toBeObject();
 	expectTypeOf<PluginOptions>().toHaveProperty('htmlFragmentPrintWidth');
