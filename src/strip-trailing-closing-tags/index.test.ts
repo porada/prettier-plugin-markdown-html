@@ -6,11 +6,9 @@ test('strips closing tags from the end of an HTML fragment', () => {
 		stripTrailingClosingTags('<details><summary>foo</summary></details>', [
 			'details',
 		])
-	).toStrictEqual('<details><summary>foo</summary>');
+	).toBe('<details><summary>foo</summary>');
 
-	expect(stripTrailingClosingTags('<p>foo</p>', [])).toStrictEqual(
-		'<p>foo</p>'
-	);
+	expect(stripTrailingClosingTags('<p>foo</p>', [])).toBe('<p>foo</p>');
 
 	expect(stripTrailingClosingTags('<p>foo</p>', ['details'])).toBeUndefined();
 });

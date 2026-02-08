@@ -4,7 +4,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 import formatHTML from '../format-html/index.ts';
 import preprocessMarkdown from './index.ts';
 
-vi.mock('../format-html/index.ts', () => ({
+vi.mock(import('../format-html/index.ts'), () => ({
 	default: vi.fn(async (text: string) => {
 		/* oxlint-disable-next-line eslint/no-promise-executor-return */
 		await new Promise((resolve) => setTimeout(resolve));
