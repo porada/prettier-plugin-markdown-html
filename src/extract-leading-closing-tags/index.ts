@@ -4,7 +4,7 @@ export default function extractLeadingClosingTags(html: string): {
 } {
 	const closingTags: string[] = [];
 	const closingTagPattern =
-		/\s*(<\/[a-z][a-z0-9-]*\b(?:[^<>"']+|"[^"]*"|'[^']*')*>)/iy;
+		/\s*(<\/[a-z][a-z0-9-]*\b(?:[^<>"']|"[^"]*"|'[^']*')*>)/iy;
 
 	let index = 0;
 

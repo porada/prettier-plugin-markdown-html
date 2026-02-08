@@ -2,8 +2,7 @@ import isVoidTag from '../is-void-tag/index.ts';
 
 export default function findUnclosedTags(html: string): string[] {
 	const unclosedTags: string[] = [];
-	const tagPattern =
-		/<\/?([a-z][a-z0-9-]*)\b(?:[^<>"']+|"[^"]*"|'[^']*')*>/iy;
+	const tagPattern = /<\/?([a-z][a-z0-9-]*)\b(?:[^<>"']|"[^"]*"|'[^']*')*>/iy;
 
 	let index = 0;
 
