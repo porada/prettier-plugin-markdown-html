@@ -46,7 +46,7 @@
 
 This plugin adds an extra level of consistency to Markdown files by formatting raw HTML fragments.
 
-- Works with `README.md` and any other GitHub-flavored Markdown document.
+- Works with `README.md` and any other GitHub-Flavored Markdown document.
 - Respects Prettier’s built-in HTML options.
 - Comes without any additional dependencies.
 
