@@ -2,6 +2,11 @@ import { expect, test } from 'vitest';
 import extractLeadingClosingTags from './index.ts';
 
 test('extracts closing tags from the beginning of an HTML fragment', () => {
+	expect(extractLeadingClosingTags('foo')).toStrictEqual({
+		closingTags: '',
+		html: 'foo',
+	});
+
 	expect(
 		extractLeadingClosingTags('\t</details>\t\r\n\t</div> <p>foo</p>')
 	).toStrictEqual({
@@ -17,5 +22,14 @@ test('extracts closing tags from the beginning of an HTML fragment', () => {
 	expect(extractLeadingClosingTags('<img src="#" />')).toStrictEqual({
 		closingTags: '',
 		html: '<img src="#" />',
+	});
+});
+
+test('handles incorrect HTML', () => {
+	expect(
+		extractLeadingClosingTags('</div title="<p>"> <p>foo</p>')
+	).toStrictEqual({
+		closingTags: '</div title="<p>">',
+		html: '<p>foo</p>',
 	});
 });

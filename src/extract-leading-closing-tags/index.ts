@@ -2,21 +2,30 @@ export default function extractLeadingClosingTags(html: string): {
 	closingTags: string;
 	html: string;
 } {
-	const leadingTags = html.match(/^\s*(?:<\/[a-z][a-z0-9-]*\s*>\s*)+/i)?.[0];
+	const closingTags: string[] = [];
+	const closingTagPattern =
+		/\s*(<\/[a-z][a-z0-9-]*\b(?:[^<>"']+|"[^"]*"|'[^']*')*>)/iy;
 
-	if (!leadingTags) {
-		return { closingTags: '', html };
+	let index = 0;
+
+	while (true) {
+		closingTagPattern.lastIndex = index;
+		const match = closingTagPattern.exec(html);
+
+		if (!match || match.index !== index) {
+			break;
+		}
+
+		closingTags.push(match[1]!);
+		index = closingTagPattern.lastIndex;
 	}
 
-	const closingTags = leadingTags.match(/<\/[a-z][a-z0-9-]*\s*>/gi);
-
-	/* v8 ignore if -- @preserve */
-	if (!closingTags || closingTags.length === 0) {
+	if (closingTags.length === 0) {
 		return { closingTags: '', html };
 	}
 
 	return {
 		closingTags: closingTags.join('\n'),
-		html: html.slice(leadingTags.length).trim(),
+		html: html.slice(index).trim(),
 	};
 }
