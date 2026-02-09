@@ -1,6 +1,6 @@
 {
 	"name": "prettier-plugin-markdown-html",
-	"version": "1.1.0",
+	"version": "1.2.0",
 	"description": "Format raw HTML in Markdown with Prettier",
 	"license": "MIT",
 	"author": {
@@ -15,6 +15,7 @@
 	"keywords": [
 		"formatting",
 		"gfm",
+		"github",
 		"github-flavored-markdown",
 		"html",
 		"markdown",
