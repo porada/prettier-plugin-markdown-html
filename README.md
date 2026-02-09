@@ -2,7 +2,7 @@
     <a href="https://github.com/porada/prettier-plugin-markdown-html">
         <picture>
             <source
-                srcset="https://github.com/porada/prettier-plugin-markdown-html/blob/main/assets/prettier-plugin-markdown-html-dark-scheme@3x.png?raw=true"
+                srcset="assets/prettier-plugin-markdown-html-dark-scheme@3x.png"
                 media="(prefers-color-scheme: dark)"
             />
             <source
