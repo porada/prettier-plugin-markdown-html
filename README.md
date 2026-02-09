@@ -6,11 +6,11 @@
                 media="(prefers-color-scheme: dark)"
             />
             <source
-                srcset="https://github.com/porada/prettier-plugin-markdown-html/blob/main/assets/prettier-plugin-markdown-html-light-scheme@3x.png?raw=true"
+                srcset="assets/prettier-plugin-markdown-html-light-scheme@3x.png"
                 media="(prefers-color-scheme: light)"
             />
             <img
-                src="https://github.com/porada/prettier-plugin-markdown-html/blob/main/assets/prettier-plugin-markdown-html-light-scheme@3x.png?raw=true"
+                src="assets/prettier-plugin-markdown-html-light-scheme@3x.png"
                 width="520"
                 alt=""
             />
