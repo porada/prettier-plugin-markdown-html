@@ -75,12 +75,7 @@ async function formatHTMLGroup(
 	group: AST.HTMLGroup,
 	options: ParserOptions
 ): Promise<AST.Node[]> {
-	const node = group.children[0];
-
-	/* v8 ignore if -- @preserve */
-	if (!node) {
-		return [];
-	}
+	const node = group.children[0]!;
 
 	const { closingTags, html } = extractLeadingClosingTags(group.value);
 

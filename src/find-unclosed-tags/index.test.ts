@@ -24,4 +24,5 @@ test('handles incorrect HTML', () => {
 	expect(findUnclosedTags('<p></div>')).toStrictEqual(['p']);
 	expect(findUnclosedTags('<div><p></div>')).toStrictEqual(['div', 'p']);
 	expect(findUnclosedTags('<div <p>foo</p>')).toStrictEqual([]);
+	expect(findUnclosedTags('<div><!-- foo <p>')).toStrictEqual(['div']);
 });

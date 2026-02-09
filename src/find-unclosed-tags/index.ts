@@ -33,13 +33,7 @@ export default function findUnclosedTags(html: string): string[] {
 		}
 
 		const [token] = match;
-		const tagName = match[1]?.toLowerCase();
-
-		/* v8 ignore if -- @preserve */
-		if (!tagName) {
-			index = tagStartIndex + 1;
-			continue;
-		}
+		const tagName = match[1]!.toLowerCase();
 
 		index = tagPattern.lastIndex;
 
