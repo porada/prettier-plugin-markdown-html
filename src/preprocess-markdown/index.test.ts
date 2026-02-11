@@ -6,7 +6,6 @@ import preprocessMarkdown from './index.ts';
 
 vi.mock(import('../format-html/index.ts'), () => ({
 	default: vi.fn(async (text: string) => {
-		/* oxlint-disable-next-line eslint/no-promise-executor-return */
 		await new Promise((resolve) => setTimeout(resolve));
 		return text;
 	}),
