@@ -39,7 +39,7 @@
 		"prettier": ">=3"
 	},
 	"devDependencies": {
-		"@standard-config/eslint": "^1.4.1",
+		"@standard-config/eslint": "^1.5.2",
 		"@standard-config/oxlint": "^1.1.7",
 		"@standard-config/prettier": "^1.9.1",
 		"@standard-config/tsconfig": "^2.0.2",
@@ -47,7 +47,7 @@
 		"eslint": "^10.0.1",
 		"husky": "^9.1.7",
 		"jiti": "^2.6.1",
-		"oxlint": "^1.47.0",
+		"oxlint": "^1.49.0",
 		"oxlint-tsgolint": "^0.14.2",
 		"prettier": "^3.8.1",
 		"publint": "^0.3.17",
