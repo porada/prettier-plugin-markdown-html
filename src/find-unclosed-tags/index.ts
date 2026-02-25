@@ -45,7 +45,6 @@ export default function findUnclosedTags(html: string): string[] {
 			if (unclosedTags.at(-1) === tagName) {
 				unclosedTags.pop();
 			}
-
 			continue;
 		}
 
