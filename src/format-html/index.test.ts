@@ -7,9 +7,7 @@ vi.mock(import('prettier'), async (importActual) => {
 
 	return {
 		...actual,
-		format: vi.fn(() => {
-			throw new Error();
-		}),
+		format: vi.fn(async (text: string) => Promise.resolve(text)),
 	};
 });
 

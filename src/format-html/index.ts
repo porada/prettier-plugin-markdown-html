@@ -34,8 +34,8 @@ export default async function formatHTML(
 		});
 
 		return formatted.trim();
-	} catch {
-		return text;
+	} catch (error: unknown) {
+		reportFormattingError(filepath, error);
 	}
 }
 
@@ -65,4 +65,24 @@ function omitParserOptions(
 	/* oxlint-enable eslint/no-unused-vars */
 
 	return formattingOptions;
+}
+
+function reportFormattingError(
+	filepath: string | undefined,
+	error: unknown
+): never {
+	let message =
+		'[prettier-plugin-markdown-html] Failed to format HTML fragment';
+
+	/* v8 ignore if -- @preserve */
+	if (filepath) {
+		message += ` in ${filepath}`;
+	}
+
+	/* v8 ignore if -- @preserve */
+	if (error instanceof Error) {
+		error.message = `${message}\n\n${error.message}`;
+	}
+
+	throw error;
 }
