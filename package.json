@@ -1,6 +1,6 @@
 {
 	"name": "prettier-plugin-markdown-html",
-	"version": "1.3.0",
+	"version": "1.4.0",
 	"description": "Format raw HTML in Markdown with Prettier",
 	"license": "MIT",
 	"author": {
