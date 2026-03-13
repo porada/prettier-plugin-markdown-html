@@ -188,12 +188,14 @@ test('handles empty files', async () => {
 test('reports formatting errors', async () => {
 	const TEST_MARKDOWN = '<div><p></div></p>';
 
-	await expect(
-		format(TEST_MARKDOWN, {
-			parser: 'markdown',
-			plugins: [pluginMarkdownHTML],
-		})
-	).rejects.toThrow(
+	const output = (await format(TEST_MARKDOWN, {
+		parser: 'markdown',
+		plugins: [pluginMarkdownHTML],
+	}).catch((error: unknown) => error)) as Error;
+
+	expect(output).toBeInstanceOf(Error);
+	expect(output.cause).toBeInstanceOf(Error);
+	expect(output.message).toContain(
 		'[prettier-plugin-markdown-html] Failed to format HTML fragment'
 	);
 });

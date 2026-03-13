@@ -74,15 +74,19 @@ function reportFormattingError(
 	let message =
 		'[prettier-plugin-markdown-html] Failed to format HTML fragment';
 
-	/* v8 ignore if -- @preserve */
+	/* v8 ignore start -- @preserve */
 	if (filepath) {
 		message += ` in ${filepath}`;
 	}
 
-	/* v8 ignore if -- @preserve */
-	if (error instanceof Error) {
-		error.message = `${message}\n\n${error.message}`;
+	if (error instanceof Error && error.message) {
+		message += `\n\n${error.message}`;
 	}
 
-	throw error;
+	if (error instanceof SyntaxError) {
+		throw new SyntaxError(message, { cause: error });
+	}
+
+	throw new Error(message, { cause: error });
+	/* v8 ignore stop -- @preserve */
 }
