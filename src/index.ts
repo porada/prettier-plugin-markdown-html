@@ -18,9 +18,8 @@ export const printers: Plugin['printers'] = {
 		async preprocess(ast, options) {
 			const { preprocess } = markdownPrinters.mdast;
 
-			/* oxlint-disable-next-line typescript/no-unsafe-assignment */
+			/* v8 ignore next -- @preserve */
 			const root: AST.Node =
-				/* v8 ignore next -- @preserve */
 				typeof preprocess === 'function'
 					? await preprocess(ast, options)
 					: ast;
