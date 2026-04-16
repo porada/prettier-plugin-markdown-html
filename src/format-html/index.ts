@@ -1,6 +1,7 @@
 import type { Options, ParserOptions } from 'prettier';
 import { format } from 'prettier';
 
+/* oxlint-disable-next-line typescript/consistent-return */
 export default async function formatHTML(
 	text: string,
 	options?: Options | ParserOptions

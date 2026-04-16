@@ -3,6 +3,7 @@ autoInstallPeers: false
 blockExoticSubdeps: true
 
 overrides:
+  prettier-plugin-markdown-html: '-'
   vite-plus>oxfmt: '-'
 
 peerDependencyRules:
