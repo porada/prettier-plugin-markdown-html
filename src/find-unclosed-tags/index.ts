@@ -1,3 +1,4 @@
+import isRawTextTag from '../is-raw-text-tag/index.ts';
 import isVoidTag from '../is-void-tag/index.ts';
 
 export default function findUnclosedTags(html: string): string[] {
@@ -48,8 +49,36 @@ export default function findUnclosedTags(html: string): string[] {
 			continue;
 		}
 
+		if (isRawTextTag(tagName)) {
+			const closingTagEndIndex = findClosingTagEndIndex(
+				html,
+				tagName,
+				index
+			);
+
+			if (closingTagEndIndex === -1) {
+				unclosedTags.push(tagName);
+				break;
+			}
+
+			index = closingTagEndIndex;
+			continue;
+		}
+
 		unclosedTags.push(tagName);
 	}
 
 	return unclosedTags;
+}
+
+function findClosingTagEndIndex(
+	html: string,
+	tagName: string,
+	startIndex: number
+): number {
+	const closingTagPattern = new RegExp(`</${tagName}\\s*>`, 'gi');
+	closingTagPattern.lastIndex = startIndex;
+
+	const match = closingTagPattern.exec(html);
+	return match ? closingTagPattern.lastIndex : -1;
 }
