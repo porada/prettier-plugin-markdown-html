@@ -1,9 +1,0 @@
-{
-	"files.exclude": {
-		".editorconfig": true
-	},
-	"search.exclude": {
-		"**/*.snap": true,
-		"pnpm-lock.yaml": true
-	}
-}

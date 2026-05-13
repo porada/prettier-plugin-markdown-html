@@ -34,7 +34,7 @@
 	"engines": {
 		"node": ">=20"
 	},
-	"packageManager": "pnpm@10.33.0",
+	"packageManager": "pnpm@11.1.1",
 	"peerDependencies": {
 		"prettier": ">=3"
 	},
@@ -43,13 +43,13 @@
 		"@standard-config/oxlint": "^1.9.0",
 		"@standard-config/prettier": "^1.13.0",
 		"@standard-config/tsconfig": "^3.1.0",
-		"@vitest/coverage-v8": "^4.1.4",
+		"@vitest/coverage-v8": "^4.1.6",
 		"eslint": "^10.3.0",
 		"prettier": "^3.8.3",
-		"publint": "^0.3.20",
+		"publint": "^0.3.21",
 		"typescript": "^6.0.3",
-		"vite-plus": "^0.1.19",
-		"vitest": "^4.1.4"
+		"vite-plus": "^0.1.21",
+		"vitest": "^4.1.6"
 	},
 	"scripts": {
 		"build": "vp pack",
