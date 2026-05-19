@@ -23,19 +23,19 @@
 <p align="center">Format raw HTML in&nbsp;Markdown with&nbsp;Prettier.</p>
 
 <p align="center">
-    <a href="https://www.npmjs.com/package/prettier-plugin-markdown-html"
+    <a href="https://npmx.dev/package/prettier-plugin-markdown-html"
         ><img
-            src="https://img.shields.io/npm/v/prettier-plugin-markdown-html"
+            src="https://img.shields.io/npm/v/prettier-plugin-markdown-html?style=flat-square"
             alt=""
     /></a>
     <a href="https://github.com/porada/prettier-plugin-markdown-html/actions/workflows/test.yaml"
         ><img
-            src="https://img.shields.io/github/actions/workflow/status/porada/prettier-plugin-markdown-html/test.yaml"
+            src="https://img.shields.io/github/actions/workflow/status/porada/prettier-plugin-markdown-html/test.yaml?style=flat-square"
             alt=""
     /></a>
     <a href="https://codecov.io/github/porada/prettier-plugin-markdown-html"
         ><img
-            src="https://img.shields.io/codecov/c/github/porada/prettier-plugin-markdown-html"
+            src="https://img.shields.io/codecov/c/github/porada/prettier-plugin-markdown-html?style=flat-square"
             alt=""
     /></a>
 </p>
