@@ -18,8 +18,8 @@ importers:
         specifier: ^1.9.0
         version: 1.9.0(oxlint@1.63.0)
       '@standard-config/prettier':
-        specifier: ^1.13.1
-        version: 1.13.1(prettier@3.8.3)
+        specifier: ^1.13.2
+        version: 1.13.2(prettier@3.8.3)
       '@standard-config/tsconfig':
         specifier: ^3.1.0
         version: 3.1.0(typescript@6.0.3)
@@ -628,8 +628,8 @@ packages:
       oxlint-tsgolint:
         optional: true
 
-  '@standard-config/prettier@1.13.1':
-    resolution: {integrity: sha512-eO3/sKNEH9VLQE6yLam/WjiT9LfIwEAYAfuFofpVBM1T8CRNvuiyeZzl3jwGbJjnGreJfNVtupB5TACuile91g==}
+  '@standard-config/prettier@1.13.2':
+    resolution: {integrity: sha512-rzYdVYPgOKqULH25cKs1vdqHEw4Lk/W21YGc8zI4HLzOvNGR/zZ/soVUBPsUqMH4KlDo3beyuZTOkEm+S/udDg==}
     engines: {node: '>=20'}
     peerDependencies:
       prettier: ^3.8.0
@@ -1357,8 +1357,8 @@ packages:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
     engines: {node: '>= 0.8.0'}
 
-  prettier-plugin-expand-json@1.0.4:
-    resolution: {integrity: sha512-uBC3RrA+XhyJlHwBfeYPjK2yRRsRqDXWxhacYj9W5VmHlAjVTqpgw3A0OpItlcq5RsHGDlr4R9qWdqvJGR2DXw==}
+  prettier-plugin-expand-json@1.0.5:
+    resolution: {integrity: sha512-ggjy4JiQ03+m006D618vMYCKUwfQZVg2/+LHvCRtEHuz6BYK9HMutlBIJSDPdBDAZEP+50bL4/Tz83EdllOsEA==}
     engines: {node: '>=20'}
     peerDependencies:
       prettier: '>=3'
@@ -2050,11 +2050,11 @@ snapshots:
     dependencies:
       oxlint: 1.63.0(oxlint-tsgolint@0.22.1)
 
-  '@standard-config/prettier@1.13.1(prettier@3.8.3)':
+  '@standard-config/prettier@1.13.2(prettier@3.8.3)':
     dependencies:
       '@prettier/plugin-oxc': 0.1.4
       prettier: 3.8.3
-      prettier-plugin-expand-json: 1.0.4(prettier@3.8.3)
+      prettier-plugin-expand-json: 1.0.5(prettier@3.8.3)
       prettier-plugin-markdown-html: 1.4.1(prettier@3.8.3)
       prettier-plugin-pkg: 0.22.1(prettier@3.8.3)
       prettier-plugin-sh: 0.18.1(prettier@3.8.3)
@@ -2789,7 +2789,7 @@ snapshots:
 
   prelude-ls@1.2.1: {}
 
-  prettier-plugin-expand-json@1.0.4(prettier@3.8.3):
+  prettier-plugin-expand-json@1.0.5(prettier@3.8.3):
     dependencies:
       prettier: 3.8.3
 
