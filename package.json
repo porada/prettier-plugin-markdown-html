@@ -12,6 +12,10 @@
 		"type": "git",
 		"url": "git+https://github.com/porada/prettier-plugin-markdown-html.git"
 	},
+	"homepage": "https://github.com/porada/prettier-plugin-markdown-html",
+	"bugs": {
+		"url": "https://github.com/porada/prettier-plugin-markdown-html/issues"
+	},
 	"keywords": [
 		"formatting",
 		"gfm",
