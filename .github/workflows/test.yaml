@@ -31,6 +31,6 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
       - run: node --version
-      - uses: pnpm/action-setup@v6.0.8
+      - uses: pnpm/action-setup@v6.0.9
       - run: pnpm install
       - run: pnpm test
