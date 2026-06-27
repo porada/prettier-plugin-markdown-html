@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test } from 'vite-plus/test';
 import isRawTextTag from './index.ts';
 
 test('identifies raw text tag names', () => {

@@ -22,6 +22,8 @@ jobs:
         with:
           node-version: 24
       - uses: pnpm/action-setup@v6.0.9
+        with:
+          cache: true
       - run: pnpm install
       - run: pnpm build
 
@@ -35,6 +37,8 @@ jobs:
         with:
           node-version: 24
       - uses: pnpm/action-setup@v6.0.9
+        with:
+          cache: true
       - run: pnpm install
       - run: pnpm test --coverage
       - uses: codecov/codecov-action@v7.0.0
@@ -51,6 +55,8 @@ jobs:
         with:
           node-version: 24
       - uses: pnpm/action-setup@v6.0.9
+        with:
+          cache: true
       - run: pnpm install
       - run: pnpm format:check
 
@@ -64,6 +70,8 @@ jobs:
         with:
           node-version: 24
       - uses: pnpm/action-setup@v6.0.9
+        with:
+          cache: true
       - run: pnpm install
       - run: pnpm lint:check
 
@@ -77,5 +85,7 @@ jobs:
         with:
           node-version: 24
       - uses: pnpm/action-setup@v6.0.9
+        with:
+          cache: true
       - run: pnpm install
       - run: pnpm typecheck

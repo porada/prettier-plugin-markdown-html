@@ -1,6 +1,6 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
-import { beforeEach, expect, test, vi } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import formatHTML from '../format-html/index.ts';
 import preprocessMarkdown from './index.ts';
 

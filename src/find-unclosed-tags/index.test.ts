@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test } from 'vite-plus/test';
 import findUnclosedTags from './index.ts';
 
 test('finds unclosed tags in an HTML fragment', () => {

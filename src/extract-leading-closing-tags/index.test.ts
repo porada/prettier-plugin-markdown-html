@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test } from 'vite-plus/test';
 import extractLeadingClosingTags from './index.ts';
 
 test('extracts closing tags from the beginning of an HTML fragment', () => {

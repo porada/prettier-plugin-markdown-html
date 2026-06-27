@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test } from 'vite-plus/test';
 import stripTrailingClosingTags from './index.ts';
 
 test('strips closing tags from the end of an HTML fragment', () => {

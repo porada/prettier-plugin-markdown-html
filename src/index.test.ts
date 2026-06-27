@@ -1,7 +1,7 @@
 import type { Plugin } from 'prettier';
 import type { PluginOptions } from './index.ts';
 import { format } from 'prettier';
-import { expect, expectTypeOf, test } from 'vitest';
+import { expect, expectTypeOf, test } from 'vite-plus/test';
 import * as pluginMarkdownHTML from './index.ts';
 
 test('exposes correct public API', () => {

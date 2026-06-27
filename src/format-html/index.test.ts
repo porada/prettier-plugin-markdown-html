@@ -1,5 +1,5 @@
 import { format } from 'prettier';
-import { expect, test, vi } from 'vitest';
+import { expect, test, vi } from 'vite-plus/test';
 import formatHTML from './index.ts';
 
 vi.mock(import('prettier'), async (importActual) => {

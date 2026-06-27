@@ -34,22 +34,21 @@
 	"engines": {
 		"node": ">=20"
 	},
-	"packageManager": "pnpm@11.5.3",
+	"packageManager": "pnpm@11.9.0",
 	"peerDependencies": {
 		"prettier": ">=3"
 	},
 	"devDependencies": {
-		"@standard-config/oxlint": "^2.2.1",
-		"@standard-config/oxlint-stylistic": "^2.2.1",
+		"@standard-config/oxlint": "^2.2.2",
+		"@standard-config/oxlint-stylistic": "^2.2.2",
 		"@standard-config/prettier": "^1.13.3",
 		"@standard-config/tsconfig": "^3.2.0",
 		"@vitest/coverage-v8": "^4.1.9",
 		"eslint": "^10.5.0",
-		"prettier": "^3.8.4",
+		"prettier": "^3.9.0",
 		"publint": "^0.3.21",
 		"typescript": "^6.0.3",
-		"vite-plus": "^0.2.1",
-		"vitest": "^4.1.9"
+		"vite-plus": "^0.2.1"
 	},
 	"scripts": {
 		"build": "vp pack",
@@ -60,7 +59,7 @@
 		"lint:check": "vp lint --deny-warnings --type-check",
 		"prepack": "pnpm run '/^(format:check|lint:check|test|typecheck)$/' && pnpm build",
 		"prepare": "vp config",
-		"test": "vitest run",
+		"test": "vp test",
 		"typecheck": "tsc --noEmit"
 	}
 }
