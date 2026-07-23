@@ -34,12 +34,12 @@
 	"engines": {
 		"node": ">=20"
 	},
-	"packageManager": "pnpm@11.14.0",
+	"packageManager": "pnpm@11.17.0",
 	"peerDependencies": {
 		"prettier": ">=3"
 	},
 	"devDependencies": {
-		"@standard-config/oxlint": "^2.4.3",
+		"@standard-config/oxlint": "^2.5.0",
 		"@standard-config/oxlint-stylistic": "^2.5.0",
 		"@standard-config/prettier": "^1.17.0",
 		"@standard-config/tsconfig": "^3.2.0",
