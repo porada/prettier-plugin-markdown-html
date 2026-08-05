@@ -1,11 +1,11 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import extractLeadingClosingTags from '../extract-leading-closing-tags/index.ts';
-import findUnclosedTags from '../find-unclosed-tags/index.ts';
 import formatHTML from '../format-html/index.ts';
 import isBlockTag from '../is-block-tag/index.ts';
 import isRawTextTag from '../is-raw-text-tag/index.ts';
 import stripTrailingClosingTags from '../strip-trailing-closing-tags/index.ts';
+import TagScanner from '../tag-scanner/index.ts';
 
 export default async function preprocessMarkdown(
 	root: AST.Node,
@@ -138,9 +138,9 @@ function collectHTMLGroup(
 	childIndex: number,
 	originalText: string
 ): AST.HTMLGroup {
+	const htmlParts: string[] = [];
 	const nodes: AST.HTMLNode[] = [];
-
-	let html = '';
+	const scanner = new TagScanner();
 
 	for (let index = childIndex; index < children.length; index += 1) {
 		const child = children[index]!;
@@ -152,16 +152,19 @@ function collectHTMLGroup(
 		if (
 			nodes.length > 0 &&
 			hasBlankLineBetweenNodes(nodes.at(-1)!, child, originalText) &&
-			findUnclosedTags(html).length === 0
+			!scanner.hasUnclosedTags()
 		) {
 			break;
 		}
 
-		html = html ? `${html}\n${child.value}` : child.value;
+		const html = htmlParts.length === 0 ? child.value : `\n${child.value}`;
+
+		scanner.consume(html);
+		htmlParts.push(child.value);
 		nodes.push(child);
 	}
 
-	return { value: html.trim(), children: nodes };
+	return { value: htmlParts.join('\n').trim(), children: nodes };
 }
 
 async function formatHTMLGroup(
@@ -178,11 +181,11 @@ async function formatHTMLGroup(
 		return [node];
 	}
 
-	// Prettier’s HTML parser requires raw-text elements to have an end tag,
+	// Prettier’s HTML parser requires raw-text elements to have a closing tag,
 	// while the Markdown syntax tree represents inline opening and closing
 	// tags as separate nodes
 	const parseableHTML = rawTextTag ? `${html}</${rawTextTag}>` : html;
-	const unclosedTags = findUnclosedTags(html);
+	const unclosedTags = TagScanner.scan(html);
 	const formattedHTML = stripTrailingClosingTags(
 		await formatHTML(parseableHTML, options),
 		unclosedTags
@@ -204,7 +207,7 @@ function findCompletableRawTextTag(
 	childIndex: number,
 	child: AST.HTMLNode
 ): string | undefined {
-	const tagName = findUnclosedTags(child.value).at(-1);
+	const tagName = TagScanner.scan(child.value).at(-1);
 
 	if (!tagName || !isRawTextTag(tagName)) {
 		return undefined;

@@ -263,6 +263,58 @@ test('preserves blank lines between nested HTML blocks', async () => {
 	expect(output).toBe(input);
 });
 
+test('preserves blank lines after a tag split across HTML nodes', async () => {
+	const input = `<section>
+<div title="
+
+<aside>">
+
+</div>
+</section>
+
+<p>separate</p>
+`;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`<section>
+  <div
+    title="
+<aside>"
+  ></div>
+</section>
+
+<p>separate</p>
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test('formats a root tag split across HTML nodes', async () => {
+	const input = `<div title="
+
+<aside>">
+
+</div>
+`;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`<div
+  title="
+<aside>"
+></div>
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
 test('supports `requirePragma`', async () => {
 	const input = `<!-- @format -->
 
