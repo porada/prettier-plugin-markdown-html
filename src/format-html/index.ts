@@ -50,8 +50,10 @@ function omitParserOptions(
 	const {
 		__embeddedInHtml,
 		astFormat,
+		checkIgnorePragma,
 		cursorOffset,
 		getVisitorKeys,
+		insertPragma,
 		locEnd,
 		locStart,
 		originalText,
@@ -60,6 +62,7 @@ function omitParserOptions(
 		printer,
 		rangeEnd,
 		rangeStart,
+		requirePragma,
 		...formattingOptions
 	} = options;
 	/* oxlint-enable eslint/no-unused-vars */

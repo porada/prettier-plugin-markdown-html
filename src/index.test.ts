@@ -208,6 +208,43 @@ test('preserves blank lines between nested HTML blocks', async () => {
 	expect(output).toBe(input);
 });
 
+test('supports `requirePragma`', async () => {
+	const input = `<!-- @format -->
+
+<div id = "foo" class = "bar">baz</div>
+`;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		requirePragma: true,
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`<!-- @format -->
+
+<div id="foo" class="bar">baz</div>
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test('supports `insertPragma`', async () => {
+	const input = '<div id = "foo" class = "bar">baz</div>\n';
+	const options = {
+		insertPragma: true,
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`<!-- @format -->
+
+<div id="foo" class="bar">baz</div>
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
 test('respects `htmlWhitespaceSensitivity`', async () => {
 	const output = await format(TEST_MARKDOWN, {
 		parser: 'markdown',
