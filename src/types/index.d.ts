@@ -29,6 +29,8 @@ declare module 'prettier' {
 }
 
 export namespace AST {
+	export type HTMLFormatMode = 'block' | 'compact' | 'inline';
+
 	export type Point = {
 		column: number;
 		line: number;

@@ -84,6 +84,130 @@ test('formats raw HTML in Markdown', async () => {
 	expect(output).toMatchSnapshot();
 });
 
+test('formats inline HTML in paragraphs', async () => {
+	const input = 'Before <span id = "foo" class = "bar">baz</span> After\n';
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		singleAttributePerLine: true,
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`Before <span
+  id="foo"
+  class="bar">baz</span> After
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test('formats inline raw-text HTML elements', async () => {
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+
+	for (const tagName of ['script', 'style', 'textarea', 'title']) {
+		const input = `Before <${tagName} id = "foo" class = "bar">baz</${tagName}> After\n`;
+		const output = await format(input, options);
+
+		expect(output).toBe(
+			`Before <${tagName} id="foo" class="bar">baz</${tagName}> After\n`
+		);
+		await expect(format(output, options)).resolves.toBe(output);
+	}
+});
+
+test('formats block HTML in block quotes and list items', async () => {
+	const input = `> <div id = "foo" class = "bar"><span>baz</span></div>
+
+- Item
+
+  <div id = "foo" class = "bar"><span>baz</span></div>
+`;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		singleAttributePerLine: true,
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`> <div
+>   id="foo"
+>   class="bar"
+> >
+>   <span>baz</span>
+> </div>
+
+- Item
+
+  <div
+    id="foo"
+    class="bar"
+  >
+    <span>baz</span>
+  </div>
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test('keeps inline block HTML stable when wrapping prose', async () => {
+	const input =
+		'> Before <address id = "foo" class = "bar">baz</address> After\n';
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		printWidth: 10,
+		proseWrap: 'always' as const,
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`> Before <address
+>   id="foo"
+>   class="bar">baz</address>
+> After
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test('keeps inline HTML compact in headings and table cells', async () => {
+	const input = `## Before <span id = "foo" class = "bar">baz</span> After
+
+| Before <span id = "foo" class = "bar">baz</span> After |
+| --- |
+`;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		singleAttributePerLine: true,
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`## Before <span id="foo" class="bar">baz</span> After
+
+| Before <span id="foo" class="bar">baz</span> After |
+| -------------------------------------------------- |
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test('preserves blank lines between nested HTML blocks', async () => {
+	const input = `> <div id="foo">bar</div>
+>
+> <div id="baz">qux</div>
+`;
+
+	const output = await format(input, {
+		parser: 'markdown',
+		plugins: [pluginMarkdownHTML],
+	});
+
+	expect(output).toBe(input);
+});
+
 test('respects `htmlWhitespaceSensitivity`', async () => {
 	const output = await format(TEST_MARKDOWN, {
 		parser: 'markdown',

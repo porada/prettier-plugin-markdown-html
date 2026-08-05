@@ -9,6 +9,9 @@ test('exposes valid types', () => {
 
 	expectTypeOf<AST.HTMLNode>().toBeObject();
 	expectTypeOf<AST.HTMLGroup>().toBeObject();
+	expectTypeOf<AST.HTMLFormatMode>().toEqualTypeOf<
+		'block' | 'compact' | 'inline'
+	>();
 
 	expectTypeOf<AST.Point>().toBeObject();
 	expectTypeOf<AST.Position>().toBeObject();

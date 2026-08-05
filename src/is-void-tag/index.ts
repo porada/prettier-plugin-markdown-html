@@ -16,5 +16,5 @@ const HTML_VOID_TAG_NAMES = new Set([
 ]);
 
 export default function isVoidTag(tagName: string): boolean {
-	return HTML_VOID_TAG_NAMES.has(tagName);
+	return HTML_VOID_TAG_NAMES.has(tagName.toLowerCase());
 }
