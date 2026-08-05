@@ -58,7 +58,7 @@ async function formatHTMLChildren(
 		}
 
 		if (mode === 'inline') {
-			preventBlockTagLineStart(nodes, child, options);
+			preventMarkdownBlockTagLineStart(nodes, child, options);
 		}
 
 		const group =
@@ -223,15 +223,12 @@ function findCompletableRawTextTag(
 	return undefined;
 }
 
-function preventBlockTagLineStart(
+function preventMarkdownBlockTagLineStart(
 	formattedNodes: AST.Node[],
 	htmlNode: AST.HTMLNode,
 	options: ParserOptions
 ): void {
-	if (
-		options.proseWrap !== 'always' ||
-		!isMarkdownBlockOpeningTag(htmlNode.value)
-	) {
+	if (options.proseWrap !== 'always' || !isMarkdownBlockTag(htmlNode.value)) {
 		return;
 	}
 
@@ -258,8 +255,8 @@ function preventBlockTagLineStart(
 	}
 }
 
-function isMarkdownBlockOpeningTag(html: string): boolean {
-	const tagName = /^<([a-z][a-z0-9-]*)(?=[\t\n\f\r />])/i.exec(html)?.[1];
+function isMarkdownBlockTag(html: string): boolean {
+	const tagName = /^<\/?([a-z][a-z0-9-]*)(?=[\t\n\f\r />])/i.exec(html)?.[1];
 	return tagName ? isBlockTag(tagName) : false;
 }
 

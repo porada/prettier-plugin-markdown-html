@@ -84,6 +84,23 @@ test('formats raw HTML in Markdown', async () => {
 	expect(output).toMatchSnapshot();
 });
 
+test('formats HTML with optional end tags', async () => {
+	const input = '<ul><li id = "foo">bar<li id = "baz">qux</ul>\n';
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`<ul>
+  <li id="foo">bar</li>
+  <li id="baz">qux</li>
+</ul>
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
 test('formats inline HTML in paragraphs', async () => {
 	const input = 'Before <span id = "foo" class = "bar">baz</span> After\n';
 	const options = {
@@ -168,6 +185,44 @@ test('keeps inline block HTML stable when wrapping prose', async () => {
 >   id="foo"
 >   class="bar">baz</address>
 > After
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test('keeps closing block HTML stable when wrapping prose', async () => {
+	const input = 'Before <div>foo bar baz qux </div> After\n';
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		printWidth: 10,
+		proseWrap: 'always' as const,
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`Before <div>foo
+bar baz
+qux </div>
+After
+`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test('keeps closing raw-text HTML stable when wrapping prose', async () => {
+	const input = 'Before <title>foo bar baz qux </title> After\n';
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		printWidth: 10,
+		proseWrap: 'always' as const,
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toBe(`Before <title>foo
+bar baz
+qux </title>
+After
 `);
 	await expect(format(output, options)).resolves.toBe(output);
 });
