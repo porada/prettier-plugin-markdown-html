@@ -1,11 +1,5 @@
 {
 	"extends": "@standard-config/tsconfig",
-	"compilerOptions": {
-		"lib": [
-			"dom",
-			"esnext"
-		]
-	},
 	"include": [
 		"**/*"
 	],
