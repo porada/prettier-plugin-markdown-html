@@ -1,5 +1,18 @@
 import type { Options as PrettierOptions } from 'prettier';
-import type { AST, PluginOptions } from './index.d.ts';
+import type {
+	AST,
+	ParserHookName,
+	ParserInitializer,
+	ParserName,
+	ParseWithCompatibility,
+	PluginOptions,
+	PluginWithParsers,
+	PluginWithPrinters,
+	PrinterInitializer,
+	PriorParserResolver,
+	ResolvedPriorParser,
+	ResolvedPriorPrinter,
+} from './index.d.ts';
 import { expectTypeOf, test } from 'vite-plus/test';
 
 test('exposes valid types', () => {
@@ -16,6 +29,11 @@ test('exposes valid types', () => {
 	expectTypeOf<AST.Point>().toBeObject();
 	expectTypeOf<AST.Position>().toBeObject();
 
+	expectTypeOf<ParserHookName>().toEqualTypeOf<'parse' | 'preprocess'>();
+	expectTypeOf<ParserInitializer>().toBeFunction();
+	expectTypeOf<ParserName>().toEqualTypeOf<'markdown' | 'remark'>();
+	expectTypeOf<ParseWithCompatibility>().toBeFunction();
+
 	expectTypeOf<PluginOptions>().toBeObject();
 	expectTypeOf<PluginOptions>().toHaveProperty('htmlFragmentPrintWidth');
 	expectTypeOf<PluginOptions>().toHaveProperty(
@@ -24,6 +42,28 @@ test('exposes valid types', () => {
 	expectTypeOf<PluginOptions>().toHaveProperty(
 		'htmlFragmentWhitespaceSensitivity'
 	);
+
+	expectTypeOf<PluginWithParsers>().toBeObject();
+	expectTypeOf<PluginWithParsers>().toHaveProperty('parsers');
+
+	expectTypeOf<PluginWithPrinters>().toBeObject();
+	expectTypeOf<PluginWithPrinters>().toHaveProperty('printers');
+
+	expectTypeOf<PrinterInitializer>().toBeFunction();
+	expectTypeOf<PriorParserResolver>().toBeFunction();
+
+	expectTypeOf<ResolvedPriorParser>().toBeObject();
+	expectTypeOf<ResolvedPriorParser>().toHaveProperty('locationState');
+	expectTypeOf<ResolvedPriorParser>().toHaveProperty('parser');
+	expectTypeOf<ResolvedPriorParser>().toHaveProperty('plugin');
+	expectTypeOf<ResolvedPriorParser>().toHaveProperty('plugins');
+	expectTypeOf<ResolvedPriorParser>().toHaveProperty('selectedParser');
+
+	expectTypeOf<ResolvedPriorPrinter>().toBeObject();
+	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('locEnd');
+	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('locStart');
+	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('printer');
+	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('plugins');
 });
 
 test('extends Prettier’s `Options`', () => {

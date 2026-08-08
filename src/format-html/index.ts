@@ -1,26 +1,26 @@
 import type { Options, ParserOptions } from 'prettier';
 import { format } from 'prettier';
+import * as pluginHTML from 'prettier/plugins/html';
 
 export default async function formatHTML(
 	text: string,
 	options?: Options | ParserOptions
 ): Promise<string> {
-	/* oxlint-disable-next-line eslint/no-param-reassign */
-	options = omitParserOptions(options);
-
+	const formattingOptions = omitParserOptions(options);
 	const {
 		filepath,
 		htmlFragmentPrintWidth: printWidth,
 		htmlFragmentSingleAttributePerLine: singleAttributePerLine,
 		htmlFragmentWhitespaceSensitivity: htmlWhitespaceSensitivity,
-	} = options;
+	} = formattingOptions;
 
 	try {
 		const formatted = await format(text, {
-			...options,
+			...formattingOptions,
 
 			filepath: `${filepath ?? 'prettier-plugin-markdown-html'}.html`,
 			parser: 'html',
+			plugins: [pluginHTML, ...(formattingOptions.plugins ?? [])],
 
 			...(typeof htmlWhitespaceSensitivity === 'string' && {
 				htmlWhitespaceSensitivity,
@@ -77,19 +77,20 @@ function reportFormattingError(
 	let message =
 		'[prettier-plugin-markdown-html] Failed to format HTML fragment';
 
-	/* v8 ignore start -- @preserve */
 	if (filepath) {
-		message += ` in ${filepath}`;
+		message += ` in \`${filepath}\``;
 	}
 
+	/* v8 ignore next -- @preserve */
 	if (error instanceof Error && error.message) {
-		message += `\n\n${error.message}`;
+		message += `:\n\n${error.message}`;
 	}
 
+	/* v8 ignore next -- @preserve */
 	if (error instanceof SyntaxError) {
 		throw new SyntaxError(message, { cause: error });
 	}
 
+	/* v8 ignore next -- @preserve */
 	throw new Error(message, { cause: error });
-	/* v8 ignore stop -- @preserve */
 }

@@ -1,4 +1,52 @@
-import type { Options as PrettierOptions } from 'prettier';
+import type {
+	Parser,
+	ParserOptions,
+	Plugin,
+	Options as PrettierOptions,
+	Printer,
+} from 'prettier';
+
+export type ParserHookName = 'parse' | 'preprocess';
+
+export type ParserInitializer = () => Parser | Promise<Parser>;
+
+export type ParserName = 'markdown' | 'remark';
+
+export type ParseWithCompatibility = (
+	this: Parser,
+	text: string,
+	options: ParserOptions,
+	optionsForCompatibility: ParserOptions
+) => unknown;
+
+export type PluginWithParsers = Omit<Plugin, 'parsers'> & {
+	parsers: Record<string, Parser | ParserInitializer | undefined>;
+};
+
+export type PluginWithPrinters = Omit<Plugin, 'printers'> & {
+	printers: Record<string, Printer | PrinterInitializer | undefined>;
+};
+
+export type PrinterInitializer = () => Printer | Promise<Printer>;
+
+export type PriorParserResolver = (
+	options: ParserOptions
+) => Promise<ResolvedPriorParser | undefined>;
+
+export type ResolvedPriorParser = {
+	locationState: Partial<Pick<ParserOptions, 'locEnd' | 'locStart'>>;
+	parser: Parser;
+	plugin: ParserOptions['plugins'][number];
+	plugins: ParserOptions['plugins'];
+	selectedParser: Parser;
+};
+
+export type ResolvedPriorPrinter = {
+	locEnd: Parser['locEnd'];
+	locStart: Parser['locStart'];
+	plugins: ParserOptions['plugins'];
+	printer: Printer;
+};
 
 export interface PluginOptions {
 	/**

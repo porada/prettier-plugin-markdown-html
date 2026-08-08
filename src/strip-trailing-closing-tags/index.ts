@@ -6,16 +6,17 @@ export default function stripTrailingClosingTags(
 		return html;
 	}
 
+	let strippedHTML = html;
+
 	for (const tagName of tagNames.toReversed()) {
 		const closingTagPattern = new RegExp(`\\s*</${tagName}>\\s*$`, 'i');
 
-		if (!closingTagPattern.test(html)) {
+		if (!closingTagPattern.test(strippedHTML)) {
 			return undefined;
 		}
 
-		/* oxlint-disable-next-line eslint/no-param-reassign */
-		html = html.replace(closingTagPattern, '').trim();
+		strippedHTML = strippedHTML.replace(closingTagPattern, '').trim();
 	}
 
-	return html;
+	return strippedHTML;
 }

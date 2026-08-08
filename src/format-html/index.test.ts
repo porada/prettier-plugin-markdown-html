@@ -1,4 +1,5 @@
 import { format } from 'prettier';
+import * as pluginHTML from 'prettier/plugins/html';
 import { expect, test, vi } from 'vite-plus/test';
 import formatHTML from './index.ts';
 
@@ -18,6 +19,7 @@ test('formats HTML', async () => {
 	expect(format).toHaveBeenCalledWith('foo', {
 		filepath: 'prettier-plugin-markdown-html.html',
 		parser: 'html',
+		plugins: [pluginHTML],
 	});
 
 	result = await formatHTML('bar', {
@@ -29,6 +31,6 @@ test('formats HTML', async () => {
 	expect(format).toHaveBeenCalledWith('bar', {
 		filepath: 'prettier-plugin-markdown-html.html',
 		parser: 'html',
-		plugins: ['prettier-plugin-baz'],
+		plugins: [pluginHTML, 'prettier-plugin-baz'],
 	});
 });
