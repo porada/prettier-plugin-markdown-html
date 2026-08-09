@@ -36,6 +36,9 @@ test('exposes valid types', () => {
 
 	expectTypeOf<PluginOptions>().toBeObject();
 	expectTypeOf<PluginOptions>().toHaveProperty('htmlFragmentBracketSameLine');
+	expectTypeOf<PluginOptions>().toHaveProperty(
+		'htmlFragmentEmbeddedLanguageFormatting'
+	);
 	expectTypeOf<PluginOptions>().toHaveProperty('htmlFragmentPrintWidth');
 	expectTypeOf<PluginOptions>().toHaveProperty(
 		'htmlFragmentSingleAttributePerLine'
@@ -73,6 +76,9 @@ test('extends Prettier’s `Options`', () => {
 
 	expectTypeOf<PrettierOptions>().toHaveProperty(
 		'htmlFragmentBracketSameLine'
+	);
+	expectTypeOf<PrettierOptions>().toHaveProperty(
+		'htmlFragmentEmbeddedLanguageFormatting'
 	);
 	expectTypeOf<PrettierOptions>().toHaveProperty('htmlFragmentPrintWidth');
 	expectTypeOf<PrettierOptions>().toHaveProperty(

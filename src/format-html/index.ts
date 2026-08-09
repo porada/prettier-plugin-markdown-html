@@ -10,6 +10,7 @@ export default async function formatHTML(
 	const {
 		filepath,
 		htmlFragmentBracketSameLine: bracketSameLine,
+		htmlFragmentEmbeddedLanguageFormatting: embeddedLanguageFormatting,
 		htmlFragmentPrintWidth: printWidth,
 		htmlFragmentSingleAttributePerLine: singleAttributePerLine,
 		htmlFragmentWhitespaceSensitivity: htmlWhitespaceSensitivity,
@@ -24,6 +25,9 @@ export default async function formatHTML(
 			plugins: [pluginHTML, ...(formattingOptions.plugins ?? [])],
 
 			...(bracketSameLine !== undefined && { bracketSameLine }),
+			...(typeof embeddedLanguageFormatting === 'string' && {
+				embeddedLanguageFormatting,
+			}),
 			...(typeof htmlWhitespaceSensitivity === 'string' && {
 				htmlWhitespaceSensitivity,
 			}),

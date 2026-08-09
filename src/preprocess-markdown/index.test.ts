@@ -184,7 +184,10 @@ test('handles inline block HTML without source positions', async () => {
 
 test('keeps inline separators that aren’t horizontal whitespace', async () => {
 	const separators: AST.Node[] = [
-		{ type: 'text', value: 'Before ' },
+		{
+			type: 'text',
+			value: 'Before ',
+		},
 		{
 			type: 'strong',
 			children: [{ type: 'whitespace' }],

@@ -166,6 +166,22 @@ export const options: Plugin['options'] = {
 			'Keep the closing bracket on the last attribute line in block-level raw HTML fragments in Markdown.',
 		type: 'boolean',
 	},
+	htmlFragmentEmbeddedLanguageFormatting: {
+		category: 'Output',
+		description:
+			'Control formatting of `<script>` and `<style>` contents in raw HTML fragments in Markdown.',
+		type: 'choice',
+		choices: [
+			{
+				description: 'Format embedded code.',
+				value: 'auto',
+			},
+			{
+				description: 'Never format embedded code.',
+				value: 'off',
+			},
+		],
+	},
 	htmlFragmentPrintWidth: {
 		category: 'Output',
 		description:

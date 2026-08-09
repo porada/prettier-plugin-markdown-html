@@ -86,6 +86,14 @@ interface PluginOptions {
      */
     htmlFragmentBracketSameLine?: boolean | undefined;
     /**
+     * Control formatting of `<script>` and `<style>` contents in raw HTML
+     * fragments in Markdown. Unlike `embeddedLanguageFormatting`, this option
+     * does not affect code blocks. Falls back to `embeddedLanguageFormatting`
+     * when unset.
+     * @default undefined
+     */
+    htmlFragmentEmbeddedLanguageFormatting?: 'auto' | 'off' | undefined;
+    /**
      * Override the preferred line length for raw HTML fragments in Markdown.
      * Unlike `printWidth`, this option does not affect code blocks or other
      * Markdown content. Falls back to `printWidth` when unset.

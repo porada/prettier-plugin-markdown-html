@@ -643,6 +643,49 @@ test.each(MARKDOWN_PARSER_NAMES)(
 	}
 );
 
+test('respects `embeddedLanguageFormatting`', async () => {
+	const input = `<script>const value={foo:1,bar:2}</script>
+
+<style>.foo{display:block;color:red;}</style>
+`;
+
+	const outputs: string[] = [];
+
+	for (const embeddedLanguageFormatting of ['auto', 'off'] as const) {
+		outputs.push(
+			await format(input, {
+				embeddedLanguageFormatting,
+				parser: 'markdown',
+				plugins: [pluginMarkdownHTML],
+			})
+		);
+	}
+
+	expect(outputs).toMatchInlineSnapshot(`
+		[
+		  "<script>
+		  const value = { foo: 1, bar: 2 };
+		</script>
+
+		<style>
+		  .foo {
+		    display: block;
+		    color: red;
+		  }
+		</style>
+		",
+		  "<script>
+		  const value={foo:1,bar:2}
+		</script>
+
+		<style>
+		  .foo{display:block;color:red;}
+		</style>
+		",
+		]
+	`);
+});
+
 test('respects `htmlWhitespaceSensitivity`', async () => {
 	const output = await format(TEST_MARKDOWN, {
 		parser: 'markdown',
@@ -882,6 +925,55 @@ test('supports `htmlFragmentBracketSameLine`', async () => {
 		>
 		  value
 		</section>
+		\`\`\`
+		",
+		]
+	`);
+});
+
+test('supports `htmlFragmentEmbeddedLanguageFormatting`', async () => {
+	const input = `<script>const value={foo:1,bar:2}</script>
+
+\`\`\`js
+const value={foo:1,bar:2}
+\`\`\`
+`;
+
+	const outputs: string[] = [];
+
+	for (const htmlFragmentEmbeddedLanguageFormatting of [
+		'auto',
+		'off',
+	] as const) {
+		outputs.push(
+			await format(input, {
+				embeddedLanguageFormatting:
+					htmlFragmentEmbeddedLanguageFormatting === 'auto'
+						? 'off'
+						: 'auto',
+				htmlFragmentEmbeddedLanguageFormatting,
+				parser: 'markdown',
+				plugins: [pluginMarkdownHTML],
+			})
+		);
+	}
+
+	expect(outputs).toMatchInlineSnapshot(`
+		[
+		  "<script>
+		  const value = { foo: 1, bar: 2 };
+		</script>
+
+		\`\`\`js
+		const value={foo:1,bar:2}
+		\`\`\`
+		",
+		  "<script>
+		  const value={foo:1,bar:2}
+		</script>
+
+		\`\`\`js
+		const value = { foo: 1, bar: 2 };
 		\`\`\`
 		",
 		]
