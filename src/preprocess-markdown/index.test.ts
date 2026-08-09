@@ -92,6 +92,7 @@ test('formats HTML nested in block and phrasing parents', async () => {
 		'<span id = "foo" class = "bar">',
 		{
 			bracketSameLine: true,
+			htmlFragmentBracketSameLine: true,
 		}
 	);
 	expect(root.children).toStrictEqual([

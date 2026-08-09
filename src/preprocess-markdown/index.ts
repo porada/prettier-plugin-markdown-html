@@ -116,6 +116,7 @@ function getFormattingOptions(
 		// Paragraph HTML may wrap, but Markdown reparses a line-leading `>` as
 		// a block quote marker, so `>` must stay on the final attribute line
 		bracketSameLine: true,
+		htmlFragmentBracketSameLine: true,
 	};
 
 	if (mode === 'inline') {

@@ -160,6 +160,12 @@ export const printers: Plugin['printers'] = {
 export const options: Plugin['options'] = {
 	...htmlOptions,
 	...markdownOptions,
+	htmlFragmentBracketSameLine: {
+		category: 'Output',
+		description:
+			'Keep the closing bracket on the last attribute line in block-level raw HTML fragments in Markdown.',
+		type: 'boolean',
+	},
 	htmlFragmentPrintWidth: {
 		category: 'Output',
 		description:

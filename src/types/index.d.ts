@@ -50,6 +50,13 @@ export type ResolvedPriorPrinter = {
 
 export interface PluginOptions {
 	/**
+	 * Keep the closing bracket on the last attribute line in block-level raw
+	 * HTML fragments in Markdown. Unlike `bracketSameLine`, this option does
+	 * not affect code blocks. Falls back to `bracketSameLine` when unset.
+	 * @default undefined
+	 */
+	htmlFragmentBracketSameLine?: PrettierOptions['bracketSameLine'];
+	/**
 	 * Override the preferred line length for raw HTML fragments in Markdown.
 	 * Unlike `printWidth`, this option does not affect code blocks or other
 	 * Markdown content. Falls back to `printWidth` when unset.

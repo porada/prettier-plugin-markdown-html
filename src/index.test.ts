@@ -552,6 +552,44 @@ test('formats a root tag split across HTML nodes', async () => {
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
+test('respects `bracketSameLine`', async () => {
+	const input = '<div first="one" second="two" third="three">value</div>\n';
+
+	const outputs: string[] = [];
+
+	for (const bracketSameLine of [false, true]) {
+		outputs.push(
+			await format(input, {
+				bracketSameLine,
+				parser: 'markdown',
+				plugins: [pluginMarkdownHTML],
+				printWidth: 20,
+				singleAttributePerLine: true,
+			})
+		);
+	}
+
+	expect(outputs).toMatchInlineSnapshot(`
+		[
+		  "<div
+		  first="one"
+		  second="two"
+		  third="three"
+		>
+		  value
+		</div>
+		",
+		  "<div
+		  first="one"
+		  second="two"
+		  third="three">
+		  value
+		</div>
+		",
+		]
+	`);
+});
+
 test('respects `checkIgnorePragma`', async () => {
 	const input = `<!-- @noformat -->
 
@@ -635,6 +673,43 @@ test('respects `insertPragma`', async () => {
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
+test('respects `prettier-ignore` comments', async () => {
+	const inputs = [
+		`<!-- prettier-ignore -->
+<div id = "foo" class = "bar">value</div>
+`,
+		`<div>
+<!-- prettier-ignore -->
+<span id = "foo" class = "bar">value</span>
+</div>
+`,
+	];
+
+	const outputs: string[] = [];
+
+	for (const input of inputs) {
+		outputs.push(
+			await format(input, {
+				parser: 'markdown',
+				plugins: [pluginMarkdownHTML],
+			})
+		);
+	}
+
+	expect(outputs).toMatchInlineSnapshot(`
+		[
+		  "<!-- prettier-ignore -->
+		<div id = "foo" class = "bar">value</div>
+		",
+		  "<div>
+		  <!-- prettier-ignore -->
+		  <span id = "foo" class = "bar">value</span>
+		</div>
+		",
+		]
+	`);
+});
+
 test('respects `printWidth`', async () => {
 	const output = await format(TEST_MARKDOWN, {
 		parser: 'markdown',
@@ -643,6 +718,42 @@ test('respects `printWidth`', async () => {
 	});
 
 	expect(output).toMatchSnapshot();
+});
+
+test('respects `rangeStart` and `rangeEnd`', async () => {
+	const input = `<div id = "before" class = "alpha">before</div>
+
+<div id = "selected" class = "beta">selected</div>
+
+<div id = "after" class = "gamma">after</div>
+`;
+
+	const selectedInput = '<div id = "selected" class = "beta">selected</div>';
+
+	const rangeStart = input.indexOf(selectedInput);
+	const rangeEnd = rangeStart + selectedInput.length;
+
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+
+	const [expectedFullOutput, fullRangeOutput] = await Promise.all([
+		format(input, options),
+		format(input, {
+			...options,
+			rangeEnd: input.length,
+			rangeStart: 0,
+		}),
+	]);
+
+	const [expectedPartialOutput, partialRangeOutput] = await Promise.all([
+		format(input, { parser: 'markdown', rangeEnd, rangeStart }),
+		format(input, { ...options, rangeEnd, rangeStart }),
+	]);
+
+	expect(fullRangeOutput).toBe(expectedFullOutput);
+	expect(partialRangeOutput).toBe(expectedPartialOutput);
 });
 
 test('respects `requirePragma`', async () => {
@@ -712,6 +823,69 @@ test('respects `useTabs`', async () => {
 	});
 
 	expect(output).toMatchSnapshot();
+});
+
+test('supports `htmlFragmentBracketSameLine`', async () => {
+	const input = `<div first="one" second="two" third="three">value</div>
+
+\`\`\`html
+<section first="one" second="two" third="three">value</section>
+\`\`\`
+`;
+
+	const outputs: string[] = [];
+
+	for (const htmlFragmentBracketSameLine of [false, true]) {
+		outputs.push(
+			await format(input, {
+				bracketSameLine: !htmlFragmentBracketSameLine,
+				htmlFragmentBracketSameLine,
+				parser: 'markdown',
+				plugins: [pluginMarkdownHTML],
+				printWidth: 20,
+				singleAttributePerLine: true,
+			})
+		);
+	}
+
+	expect(outputs).toMatchInlineSnapshot(`
+		[
+		  "<div
+		  first="one"
+		  second="two"
+		  third="three"
+		>
+		  value
+		</div>
+
+		\`\`\`html
+		<section
+		  first="one"
+		  second="two"
+		  third="three">
+		  value
+		</section>
+		\`\`\`
+		",
+		  "<div
+		  first="one"
+		  second="two"
+		  third="three">
+		  value
+		</div>
+
+		\`\`\`html
+		<section
+		  first="one"
+		  second="two"
+		  third="three"
+		>
+		  value
+		</section>
+		\`\`\`
+		",
+		]
+	`);
 });
 
 test('supports `htmlFragmentPrintWidth`', async () => {

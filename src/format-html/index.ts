@@ -9,6 +9,7 @@ export default async function formatHTML(
 	const formattingOptions = omitParserOptions(options);
 	const {
 		filepath,
+		htmlFragmentBracketSameLine: bracketSameLine,
 		htmlFragmentPrintWidth: printWidth,
 		htmlFragmentSingleAttributePerLine: singleAttributePerLine,
 		htmlFragmentWhitespaceSensitivity: htmlWhitespaceSensitivity,
@@ -22,6 +23,7 @@ export default async function formatHTML(
 			parser: 'html',
 			plugins: [pluginHTML, ...(formattingOptions.plugins ?? [])],
 
+			...(bracketSameLine !== undefined && { bracketSameLine }),
 			...(typeof htmlWhitespaceSensitivity === 'string' && {
 				htmlWhitespaceSensitivity,
 			}),
