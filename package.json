@@ -34,7 +34,7 @@
 	"engines": {
 		"node": ">=20"
 	},
-	"packageManager": "pnpm@12.4.0",
+	"packageManager": "pnpm@12.4.1",
 	"peerDependencies": {
 		"prettier": ">=3"
 	},
