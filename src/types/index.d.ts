@@ -34,16 +34,21 @@ export type PriorParserResolver = (
 ) => Promise<ResolvedPriorParser | undefined>;
 
 export type ResolvedPriorParser = {
-	locationState: Partial<Pick<ParserOptions, 'locEnd' | 'locStart'>>;
+	delegation?: {
+		hook: ParserHookName;
+		parserName: ParserName;
+		resolveNext: () => Promise<ResolvedPriorParser | undefined>;
+	};
+	entryOptions?: Pick<ParserOptions, 'locEnd' | 'locStart' | 'plugins'>;
+	lifecycleState: Partial<
+		Pick<ParserOptions, 'locEnd' | 'locStart' | 'plugins'>
+	>;
 	parser: Parser;
 	plugin: ParserOptions['plugins'][number];
 	plugins: ParserOptions['plugins'];
-	selectedParser: Parser;
 };
 
 export type ResolvedPriorPrinter = {
-	locEnd: Parser['locEnd'];
-	locStart: Parser['locStart'];
 	plugins: ParserOptions['plugins'];
 	printer: Printer;
 };

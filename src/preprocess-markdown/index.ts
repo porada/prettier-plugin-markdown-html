@@ -1,11 +1,18 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
+import collectHTMLGroup from '../collect-html-group/index.ts';
 import extractLeadingClosingTags from '../extract-leading-closing-tags/index.ts';
 import formatHTML from '../format-html/index.ts';
 import isBlockTag from '../is-block-tag/index.ts';
 import isRawTextTag from '../is-raw-text-tag/index.ts';
 import stripTrailingClosingTags from '../strip-trailing-closing-tags/index.ts';
 import TagScanner from '../tag-scanner/index.ts';
+
+type RawTextState = {
+	tagName: string | undefined;
+};
+
+export const formattedHTMLNodes = new WeakSet<AST.Node>();
 
 export default async function preprocessMarkdown(
 	root: AST.Node,
@@ -15,7 +22,7 @@ export default async function preprocessMarkdown(
 		return root;
 	}
 
-	await formatHTMLInParent(root, options, 'block');
+	await formatHTMLInParent(root, options, 'block', { tagName: undefined });
 
 	return root;
 }
@@ -23,23 +30,24 @@ export default async function preprocessMarkdown(
 async function formatHTMLInParent(
 	parent: AST.ParentNode,
 	options: ParserOptions,
-	inheritedMode: AST.HTMLFormatMode
+	inheritedMode: AST.HTMLFormatMode,
+	rawText: RawTextState
 ): Promise<void> {
 	const mode = getChildFormatMode(parent, inheritedMode);
 
-	parent.children = await formatHTMLChildren(parent.children, options, mode);
-
-	for (const child of parent.children) {
-		if (isParentNode(child)) {
-			await formatHTMLInParent(child, options, mode);
-		}
-	}
+	parent.children = await formatHTMLChildren(
+		parent.children,
+		options,
+		mode,
+		rawText
+	);
 }
 
 async function formatHTMLChildren(
 	children: AST.Node[],
 	options: ParserOptions,
-	mode: AST.HTMLFormatMode
+	mode: AST.HTMLFormatMode,
+	rawText: RawTextState
 ): Promise<AST.Node[]> {
 	const nodes: AST.Node[] = [];
 
@@ -52,6 +60,10 @@ async function formatHTMLChildren(
 		const child = children[index]!;
 
 		if (!isHTMLNode(child)) {
+			if (isParentNode(child)) {
+				await formatHTMLInParent(child, options, mode, rawText);
+			}
+
 			nodes.push(child);
 			index += 1;
 			continue;
@@ -61,21 +73,51 @@ async function formatHTMLChildren(
 			preventMarkdownBlockTagLineStart(nodes, child, options);
 		}
 
+		// Raw text can cross Markdown parents. Do not format HTML-looking
+		// tokens in its contents as independent HTML fragments
+		if (rawText.tagName) {
+			const group =
+				mode === 'block'
+					? collectHTMLGroup(
+							children,
+							index,
+							originalText,
+							rawText.tagName
+						)
+					: { value: child.value, children: [child] };
+
+			rawText.tagName = getUnclosedRawTextTag(
+				`<${rawText.tagName}>${group.value}`
+			);
+
+			nodes.push(...group.children);
+			index += group.children.length;
+			continue;
+		}
+
 		const group =
 			mode === 'block'
 				? collectHTMLGroup(children, index, originalText)
 				: { value: child.value.trim(), children: [child] };
 
-		const rawTextTag =
-			mode === 'block'
-				? undefined
-				: findCompletableRawTextTag(children, index, child);
+		rawText.tagName = getUnclosedRawTextTag(group.value);
 
-		const groupNodes = await formatHTMLGroup(
-			group,
-			formattingOptions,
-			rawTextTag
-		);
+		const previousNode = children[index - 1];
+		const isIgnored =
+			(isHTMLNode(previousNode) &&
+				/^<!--\s*prettier-ignore\s*-->$/.test(previousNode.value)) ||
+			/^<!--\s*prettier-ignore\s*-->/.test(group.value);
+
+		// Keep ignored nodes and incomplete block raw text intact. Coalescing
+		// ignored nodes would discard source spans used by Markdown’s printer
+		const groupNodes =
+			isIgnored || (mode === 'block' && rawText.tagName)
+				? group.children
+				: await formatHTMLGroup(
+						group,
+						formattingOptions,
+						rawText.tagName
+					);
 
 		nodes.push(...groupNodes);
 		index += group.children.length;
@@ -134,40 +176,6 @@ function getFormattingOptions(
 	};
 }
 
-function collectHTMLGroup(
-	children: AST.Node[],
-	childIndex: number,
-	originalText: string
-): AST.HTMLGroup {
-	const htmlParts: string[] = [];
-	const nodes: AST.HTMLNode[] = [];
-	const scanner = new TagScanner();
-
-	for (let index = childIndex; index < children.length; index += 1) {
-		const child = children[index]!;
-
-		if (!isHTMLNode(child)) {
-			break;
-		}
-
-		if (
-			nodes.length > 0 &&
-			hasBlankLineBetweenNodes(nodes.at(-1)!, child, originalText) &&
-			!scanner.hasUnclosedTags()
-		) {
-			break;
-		}
-
-		const html = htmlParts.length === 0 ? child.value : `\n${child.value}`;
-
-		scanner.consume(html);
-		htmlParts.push(child.value);
-		nodes.push(child);
-	}
-
-	return { value: htmlParts.join('\n').trim(), children: nodes };
-}
-
 async function formatHTMLGroup(
 	group: AST.HTMLGroup,
 	options: ParserOptions,
@@ -196,35 +204,16 @@ async function formatHTMLGroup(
 		return group.children;
 	}
 
-	node.value = closingTags
-		? `${closingTags}\n\n${formattedHTML}`
-		: formattedHTML;
+	node.value = closingTags + formattedHTML;
+	formattedHTMLNodes.add(node);
 
 	return [node];
 }
 
-function findCompletableRawTextTag(
-	children: AST.Node[],
-	childIndex: number,
-	child: AST.HTMLNode
-): string | undefined {
-	const tagName = TagScanner.scan(child.value).at(-1);
+function getUnclosedRawTextTag(html: string): string | undefined {
+	const tagName = TagScanner.scan(html).at(-1);
 
-	if (!tagName || !isRawTextTag(tagName)) {
-		return undefined;
-	}
-
-	const closingTagPattern = new RegExp(`^\\s*</${tagName}\\s*>`, 'i');
-
-	for (let index = childIndex + 1; index < children.length; index += 1) {
-		const sibling = children[index];
-
-		if (isHTMLNode(sibling) && closingTagPattern.test(sibling.value)) {
-			return tagName;
-		}
-	}
-
-	return undefined;
+	return tagName && isRawTextTag(tagName) ? tagName : undefined;
 }
 
 function preventMarkdownBlockTagLineStart(
@@ -272,31 +261,6 @@ function getLastDescendant(node: AST.Node): AST.Node {
 	}
 
 	return descendant;
-}
-
-function hasBlankLineBetweenNodes(
-	previousNode: AST.Node,
-	nextNode: AST.Node,
-	originalText: string
-): boolean {
-	const { end } = previousNode.position ?? {};
-	const { start } = nextNode.position ?? {};
-
-	if (start && end && start.line > end.line + 1) {
-		return true;
-	}
-
-	if (
-		start?.offset === undefined ||
-		end?.offset === undefined ||
-		end.offset >= start.offset
-	) {
-		return false;
-	}
-
-	return /\r?\n[ \t]*\r?\n/.test(
-		originalText.slice(end.offset, start.offset)
-	);
 }
 
 function isHTMLNode(node: AST.Node | undefined): node is AST.HTMLNode {

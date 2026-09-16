@@ -2,7 +2,6 @@ export default function extractLeadingClosingTags(html: string): {
 	closingTags: string;
 	html: string;
 } {
-	const closingTags: string[] = [];
 	const closingTagPattern =
 		/\s*(<\/[a-z][a-z0-9-]*\b(?:[^<>"']|"[^"]*"|'[^']*')*>)/iy;
 
@@ -16,16 +15,19 @@ export default function extractLeadingClosingTags(html: string): {
 			break;
 		}
 
-		closingTags.push(match[1]!);
 		index = closingTagPattern.lastIndex;
 	}
 
-	if (closingTags.length === 0) {
+	if (index === 0) {
 		return { closingTags: '', html };
 	}
 
+	const remainingHTML = html.slice(index).trimStart();
+
 	return {
-		closingTags: closingTags.join('\n'),
-		html: html.slice(index).trim(),
+		closingTags: html
+			.slice(0, html.length - remainingHTML.length)
+			.trimStart(),
+		html: remainingHTML,
 	};
 }

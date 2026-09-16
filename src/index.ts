@@ -1,5 +1,6 @@
 import type { Parser, ParserOptions, Plugin, Printer } from 'prettier';
 import type { AST, ParserName, PluginOptions } from './types/index.d.ts';
+import { doc } from 'prettier';
 import * as pluginHTML from 'prettier/plugins/html';
 import * as pluginMarkdown from 'prettier/plugins/markdown';
 import {
@@ -11,7 +12,9 @@ import {
 	withPriorParserOptions,
 	withPriorPrinterOptions,
 } from './plugin-hooks/index.ts';
-import preprocessMarkdown from './preprocess-markdown/index.ts';
+import preprocessMarkdown, {
+	formattedHTMLNodes,
+} from './preprocess-markdown/index.ts';
 
 const htmlOptions = (pluginHTML as Plugin).options!;
 const markdownOptions = (pluginMarkdown as Plugin).options!;
@@ -93,7 +96,7 @@ export const parsers: Plugin['parsers'] = {
 	remark: createParser('remark'),
 };
 
-const mdastPrinter: Printer = {
+const mdastPrinter: Printer<AST.Node> = {
 	...markdownPrinters.mdast,
 
 	async preprocess(ast, options) {
@@ -132,6 +135,25 @@ const mdastPrinter: Printer = {
 		}
 
 		return preprocessMarkdown(root, options);
+	},
+
+	print(path, options, print, args) {
+		const printed = markdownPrinters.mdast.print(
+			path,
+			options,
+			print,
+			args
+		);
+
+		if (!formattedHTMLNodes.has(path.node)) {
+			return printed;
+		}
+
+		// Empty literal lines inherit container padding. Trim that padding
+		// without removing whitespace from nonempty HTML lines
+		return doc.utils.mapDoc(printed, (part) =>
+			part === '' ? doc.builders.trim : part
+		);
 	},
 };
 const resolvePriorPrinter = createPriorPrinterResolver(

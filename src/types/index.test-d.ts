@@ -1,4 +1,4 @@
-import type { Options as PrettierOptions } from 'prettier';
+import type { ParserOptions, Options as PrettierOptions } from 'prettier';
 import type {
 	AST,
 	ParserHookName,
@@ -57,17 +57,29 @@ test('exposes valid types', () => {
 	expectTypeOf<PriorParserResolver>().toBeFunction();
 
 	expectTypeOf<ResolvedPriorParser>().toBeObject();
-	expectTypeOf<ResolvedPriorParser>().toHaveProperty('locationState');
+	expectTypeOf<ResolvedPriorParser>().toHaveProperty('delegation');
+	expectTypeOf<ResolvedPriorParser['delegation']>().toEqualTypeOf<
+		| {
+				hook: ParserHookName;
+				parserName: ParserName;
+				resolveNext: () => Promise<ResolvedPriorParser | undefined>;
+		  }
+		| undefined
+	>();
+
+	expectTypeOf<ResolvedPriorParser>().toHaveProperty('entryOptions');
+	expectTypeOf<ResolvedPriorParser['entryOptions']>().toEqualTypeOf<
+		Pick<ParserOptions, 'locEnd' | 'locStart' | 'plugins'> | undefined
+	>();
+
+	expectTypeOf<ResolvedPriorParser>().toHaveProperty('lifecycleState');
 	expectTypeOf<ResolvedPriorParser>().toHaveProperty('parser');
 	expectTypeOf<ResolvedPriorParser>().toHaveProperty('plugin');
 	expectTypeOf<ResolvedPriorParser>().toHaveProperty('plugins');
-	expectTypeOf<ResolvedPriorParser>().toHaveProperty('selectedParser');
 
 	expectTypeOf<ResolvedPriorPrinter>().toBeObject();
-	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('locEnd');
-	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('locStart');
-	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('printer');
 	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('plugins');
+	expectTypeOf<ResolvedPriorPrinter>().toHaveProperty('printer');
 });
 
 test('extends Prettier’s `Options`', () => {

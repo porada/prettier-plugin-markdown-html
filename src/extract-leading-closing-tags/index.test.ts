@@ -10,7 +10,7 @@ test('extracts closing tags from the beginning of an HTML fragment', () => {
 	expect(
 		extractLeadingClosingTags('\t</details>\t\r\n\t</div> <p>foo</p>')
 	).toStrictEqual({
-		closingTags: '</details>\n</div>',
+		closingTags: '</details>\t\r\n\t</div> ',
 		html: '<p>foo</p>',
 	});
 
@@ -29,7 +29,7 @@ test('handles incorrect HTML', () => {
 	expect(
 		extractLeadingClosingTags('</div title="<p>"> <p>foo</p>')
 	).toStrictEqual({
-		closingTags: '</div title="<p>">',
+		closingTags: '</div title="<p>"> ',
 		html: '<p>foo</p>',
 	});
 });

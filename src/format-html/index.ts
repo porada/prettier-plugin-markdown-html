@@ -20,6 +20,8 @@ export default async function formatHTML(
 		const formatted = await format(text, {
 			...formattingOptions,
 
+			// The outer Markdown printer applies the requested line endings
+			endOfLine: 'lf',
 			filepath: `${filepath ?? 'prettier-plugin-markdown-html'}.html`,
 			parser: 'html',
 			plugins: [pluginHTML, ...(formattingOptions.plugins ?? [])],

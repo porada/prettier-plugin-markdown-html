@@ -11,9 +11,21 @@ import type {
 	ResolvedPriorParser,
 	ResolvedPriorPrinter,
 } from '../types/index.d.ts';
+import { printers as markdownPrinters } from 'prettier/plugins/markdown';
+
+type ParserDelegationContext = {
+	delegation?: ResolvedPriorParser['delegation'];
+	snapshot: Pick<ParserOptions, 'locEnd' | 'locStart' | 'plugins'>;
+	syncOptions: () => void;
+};
+
+type ParserOptionsWithDelegation = ParserOptions & {
+	[PARSER_DELEGATION]?: ParserDelegationContext;
+};
 
 type ParserResolverState = {
-	locationState: ResolvedPriorParser['locationState'];
+	entryOptions: NonNullable<ResolvedPriorParser['entryOptions']>;
+	lifecycleState: ResolvedPriorParser['lifecycleState'];
 	name: string;
 	parserByPluginIndex: Map<number, Promise<Parser>>;
 	plugins: ParserOptions['plugins'];
@@ -30,6 +42,10 @@ type PrinterResolverState = {
 };
 
 const NO_PRINTER_PREPROCESS = Symbol('no-printer-preprocess');
+const PARSER_DELEGATION = Symbol.for(
+	'prettier-plugin-markdown-html.parser-delegation'
+);
+const PARSER_HOOKS = Symbol.for('prettier-plugin-markdown-html.parser-hooks');
 const PARSER_MARKER = Symbol.for('prettier-plugin-markdown-html.parser');
 const PRINTER_MARKER = Symbol.for('prettier-plugin-markdown-html.printer');
 
@@ -38,6 +54,11 @@ const PRINTER_MARKER = Symbol.for('prettier-plugin-markdown-html.printer');
  */
 export function markParserAsMarkdownHTML(parser: Parser): Parser {
 	Object.defineProperty(parser, PARSER_MARKER, { value: true });
+	// Copies retain hook identities without marking their overrides as canonical
+	Object.defineProperty(parser, PARSER_HOOKS, {
+		enumerable: true,
+		value: { parse: parser.parse, preprocess: parser.preprocess },
+	});
 	return parser;
 }
 
@@ -96,11 +117,25 @@ export function createPriorParserResolver(
 	>();
 
 	return async (options, hook) => {
+		const context = (options as ParserOptionsWithDelegation)[
+			PARSER_DELEGATION
+		];
+		const delegation = context?.delegation;
+
+		if (delegation?.parserName === name && delegation.hook === hook) {
+			return delegation.resolveNext();
+		}
+
 		let state = resolverStateByOptions.get(options);
 
 		if (!state) {
 			state = {
-				locationState: {},
+				entryOptions: {
+					locEnd: currentParser.locEnd,
+					locStart: currentParser.locStart,
+					plugins: options.plugins,
+				},
+				lifecycleState: {},
 				name:
 					typeof options.parser === 'string' ? options.parser : name,
 				parserByPluginIndex: new Map(),
@@ -108,6 +143,26 @@ export function createPriorParserResolver(
 				priorParserByHook: new Map(),
 			};
 			resolverStateByOptions.set(options, state);
+		}
+
+		if (!context) {
+			if (options.locEnd !== state.entryOptions.locEnd) {
+				state.lifecycleState.locEnd = options.locEnd;
+			}
+
+			if (options.locStart !== state.entryOptions.locStart) {
+				state.lifecycleState.locStart = options.locStart;
+			}
+
+			if (options.plugins !== state.entryOptions.plugins) {
+				state.lifecycleState.plugins = options.plugins;
+			}
+
+			Object.assign(state.entryOptions, {
+				locEnd: options.locEnd,
+				locStart: options.locStart,
+				plugins: options.plugins,
+			});
 		}
 
 		const cachedParser = state.priorParserByHook.get(hook);
@@ -118,7 +173,7 @@ export function createPriorParserResolver(
 
 		const parser = findPriorParser(
 			state,
-			state.name,
+			name,
 			hook,
 			currentParser,
 			expectedAstFormat
@@ -136,44 +191,52 @@ export function createPriorParserResolver(
  */
 async function findPriorParser(
 	state: ParserResolverState,
-	name: string,
+	name: ParserName,
 	hook: ParserHookName,
 	currentParser: Parser,
-	expectedAstFormat: string
+	expectedAstFormat: string,
+	startIndex = state.plugins.length - 1,
+	omittedPluginIndexes = new Set<number>()
 ): Promise<ResolvedPriorParser | undefined> {
-	const omittedPluginIndexes = new Set<number>();
-
+	let isFirstParser = startIndex === state.plugins.length - 1;
 	let parserPlugin: ParserOptions['plugins'][number] | undefined;
-	let selectedParser: Parser | undefined;
 
-	for (let index = state.plugins.length - 1; index >= 0; index -= 1) {
+	for (let index = startIndex; index >= 0; index -= 1) {
 		const plugin = state.plugins[index];
 
-		if (!hasParsers(plugin) || !Object.hasOwn(plugin.parsers, name)) {
+		if (!hasParsers(plugin) || !Object.hasOwn(plugin.parsers, state.name)) {
 			continue;
 		}
 
-		const parserOrInitializer = plugin.parsers[name];
+		const parserOrInitializer = plugin.parsers[state.name];
 
 		if (!parserOrInitializer) {
 			continue;
 		}
 
 		const parser = await resolveParser(state, index, parserOrInitializer);
+		const isEntryParser = isFirstParser;
+		isFirstParser = false;
 
 		if (isMarkdownHTMLParser(parser)) {
 			omittedPluginIndexes.add(index);
 			continue;
 		}
 
-		assertCompatibleParser(name, parser, expectedAstFormat);
+		assertCompatibleParser(state.name, parser, expectedAstFormat);
 
 		parserPlugin ??= plugin;
-		selectedParser ??= parser;
 
+		const copiedHooks = Reflect.get(parser, PARSER_HOOKS) as
+			Pick<Parser, ParserHookName> | undefined;
 		const parserHook = parser[hook];
 
-		if (parserHook === currentParser[hook]) {
+		// Treat the selected copied wrapper as entered, even for lazy parsers
+		// This assumes the plugin list has not changed before first entry
+		if (
+			parserHook === currentParser[hook] ||
+			(copiedHooks && (isEntryParser || parserHook === copiedHooks[hook]))
+		) {
 			omittedPluginIndexes.add(index);
 			continue;
 		}
@@ -182,12 +245,38 @@ async function findPriorParser(
 			return undefined;
 		}
 
+		const omittedPlugins = new Set(
+			[...omittedPluginIndexes].map((index) => state.plugins[index])
+		);
+		let nextParser: Promise<ResolvedPriorParser | undefined> | undefined;
+
 		return {
-			locationState: state.locationState,
+			delegation: {
+				hook,
+				parserName: name,
+				resolveNext: async () => {
+					nextParser ??= findPriorParser(
+						state,
+						name,
+						hook,
+						currentParser,
+						expectedAstFormat,
+						index - 1,
+						new Set([...omittedPluginIndexes, index])
+					);
+					return nextParser;
+				},
+			},
+			entryOptions: state.entryOptions,
+			lifecycleState: state.lifecycleState,
 			parser,
 			plugin: parserPlugin,
-			plugins: omitPluginIndexes(state.plugins, omittedPluginIndexes),
-			selectedParser,
+			get plugins() {
+				const plugins = state.lifecycleState.plugins ?? state.plugins;
+				return plugins.some((plugin) => omittedPlugins.has(plugin))
+					? plugins.filter((plugin) => !omittedPlugins.has(plugin))
+					: plugins;
+			},
 		};
 	}
 
@@ -299,15 +388,6 @@ async function findPriorPrinter(
 ): Promise<ResolvedPriorPrinter | undefined> {
 	const priorParser = await resolvePriorParser(options);
 
-	const locEnd =
-		priorParser?.locationState.locEnd ??
-		priorParser?.selectedParser.locEnd ??
-		options.locEnd;
-	const locStart =
-		priorParser?.locationState.locStart ??
-		priorParser?.selectedParser.locStart ??
-		options.locStart;
-
 	const omittedPluginIndexes = findCurrentPrinterPluginIndexes(
 		state,
 		currentPrinter
@@ -330,8 +410,6 @@ async function findPriorPrinter(
 
 			if (printer) {
 				return {
-					locEnd,
-					locStart,
 					plugins: omitPluginIndexes(
 						state.plugins,
 						omittedPluginIndexes
@@ -356,8 +434,6 @@ async function findPriorPrinter(
 
 		if (printer) {
 			return {
-				locEnd,
-				locStart,
 				plugins: omitPluginIndexes(state.plugins, omittedPluginIndexes),
 				printer,
 			};
@@ -402,7 +478,7 @@ function findCurrentPrinterPluginIndexes(
 }
 
 /**
- * Accepts preprocessing extensions that reuse the current structural hooks.
+ * Accepts preprocessing extensions with compatible Markdown structural hooks.
  */
 async function resolvePriorPrinterCandidate(
 	state: PrinterResolverState,
@@ -430,7 +506,9 @@ async function resolvePriorPrinterCandidate(
 	}
 
 	return typeof printer.preprocess === 'function' &&
-		printer.print === currentPrinter.print &&
+		(printer.print === currentPrinter.print ||
+			(isMarkdownHTMLPrinter(currentPrinter) &&
+				printer.print === markdownPrinters.mdast.print)) &&
 		printer.getVisitorKeys === currentPrinter.getVisitorKeys
 		? printer
 		: NO_PRINTER_PREPROCESS;
@@ -520,12 +598,15 @@ export async function withPriorParserOptions<T>(
 	priorParser: ResolvedPriorParser,
 	callback: (options: ParserOptions) => T
 ): Promise<Awaited<T>> {
-	const { astFormat, locEnd, locStart, plugins } = options;
+	const delegationOptions = options as ParserOptionsWithDelegation;
+	const previousContext = delegationOptions[PARSER_DELEGATION];
+	previousContext?.syncOptions();
 
-	const delegatedLocEnd =
-		priorParser.locationState.locEnd ?? priorParser.parser.locEnd;
+	const { astFormat, locEnd, locStart, plugins } = options;
+	const { lifecycleState } = priorParser;
+	const delegatedLocEnd = lifecycleState.locEnd ?? priorParser.parser.locEnd;
 	const delegatedLocStart =
-		priorParser.locationState.locStart ?? priorParser.parser.locStart;
+		lifecycleState.locStart ?? priorParser.parser.locStart;
 	const delegatedPlugins = priorParser.plugins;
 
 	options.astFormat = priorParser.parser.astFormat;
@@ -533,23 +614,74 @@ export async function withPriorParserOptions<T>(
 	options.locStart = delegatedLocStart;
 	options.plugins = delegatedPlugins;
 
+	const context: ParserDelegationContext = {
+		delegation: priorParser.delegation,
+		snapshot: {
+			locEnd: delegatedLocEnd,
+			locStart: delegatedLocStart,
+			plugins: delegatedPlugins,
+		},
+		syncOptions() {
+			if (options.locEnd !== context.snapshot.locEnd) {
+				lifecycleState.locEnd = options.locEnd;
+			}
+
+			if (options.locStart !== context.snapshot.locStart) {
+				lifecycleState.locStart = options.locStart;
+			}
+
+			if (options.plugins !== context.snapshot.plugins) {
+				lifecycleState.plugins = options.plugins;
+			}
+		},
+	};
+	delegationOptions[PARSER_DELEGATION] = context;
+
+	// Keep AST handoff defaults separate from explicit hook overrides
+	let parsedLocations: Pick<ParserOptions, 'locEnd' | 'locStart'> | undefined;
+
 	try {
-		return await callback(options);
-	} finally {
-		if (options.locEnd !== delegatedLocEnd) {
-			priorParser.locationState.locEnd = options.locEnd;
+		const result = await callback(options);
+
+		if (priorParser.delegation?.hook === 'parse') {
+			parsedLocations = {
+				locEnd: options.locEnd,
+				locStart: options.locStart,
+			};
 		}
 
-		if (options.locStart !== delegatedLocStart) {
-			priorParser.locationState.locStart = options.locStart;
-		}
+		return result;
+	} finally {
+		context.syncOptions();
 
 		options.astFormat = astFormat;
-		options.locEnd = priorParser.locationState.locEnd ?? locEnd;
-		options.locStart = priorParser.locationState.locStart ?? locStart;
+		options.locEnd =
+			lifecycleState.locEnd ?? parsedLocations?.locEnd ?? locEnd;
+		options.locStart =
+			lifecycleState.locStart ?? parsedLocations?.locStart ?? locStart;
 
 		if (options.plugins === delegatedPlugins) {
 			options.plugins = plugins;
+		}
+
+		if (previousContext) {
+			// Automatic handoff becomes the parent’s baseline, not an explicit override
+			previousContext.snapshot = {
+				locEnd: options.locEnd,
+				locStart: options.locStart,
+				plugins: options.plugins,
+			};
+			delegationOptions[PARSER_DELEGATION] = previousContext;
+		} else {
+			if (priorParser.entryOptions) {
+				Object.assign(priorParser.entryOptions, {
+					locEnd: options.locEnd,
+					locStart: options.locStart,
+					plugins: options.plugins,
+				});
+			}
+
+			Reflect.deleteProperty(delegationOptions, PARSER_DELEGATION);
 		}
 	}
 }
@@ -565,8 +697,6 @@ export async function withPriorPrinterOptions<T>(
 	const { locEnd, locStart, plugins } = options;
 	const delegatedPlugins = priorPrinter.plugins;
 
-	options.locEnd = priorPrinter.locEnd;
-	options.locStart = priorPrinter.locStart;
 	options.plugins = delegatedPlugins;
 
 	try {
