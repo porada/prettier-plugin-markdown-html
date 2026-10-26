@@ -2,17 +2,19 @@ import type { Parser, ParserOptions, Plugin, Printer } from 'prettier';
 import type { PluginOptions } from './index.ts';
 import type { AST } from './types/index.d.ts';
 import { format, formatWithCursor } from 'prettier';
+import * as pluginHTML from 'prettier/plugins/html';
 import {
 	parsers as markdownParsers,
 	printers as markdownPrinters,
 } from 'prettier/plugins/markdown';
 import { format as standaloneFormat } from 'prettier/standalone';
-import { expect, expectTypeOf, test } from 'vite-plus/test';
+import { expect, expectTypeOf, onTestFinished, test } from 'vite-plus/test';
 import * as pluginMarkdownHTML from './index.ts';
 
 test('exposes correct public API', () => {
 	expectTypeOf(pluginMarkdownHTML).toExtend<Plugin>();
 
+	expect(pluginMarkdownHTML).toHaveProperty('options');
 	expect(pluginMarkdownHTML).toHaveProperty('parsers');
 	expect(pluginMarkdownHTML.parsers).toHaveProperty('markdown');
 	expect(pluginMarkdownHTML.parsers).toHaveProperty('remark');
@@ -91,7 +93,7 @@ function createPriorParser(
 		...markdownParsers[parserName],
 		preprocess: async () => {
 			await Promise.resolve();
-			return 'Parser <span id = "foo">value</span>\n';
+			return 'Parser <span id = "foo">baz</span>\n';
 		},
 	};
 }
@@ -152,44 +154,49 @@ test('composes native parser preprocess hooks', async () => {
 		return `Native ${text}`;
 	};
 
+	onTestFinished(() => {
+		markdownParsers.markdown.preprocess = nativePreprocess;
+	});
+
 	const parser = pluginMarkdownHTML.parsers?.markdown;
 
 	if (!parser || typeof parser === 'function' || !parser.preprocess) {
 		throw new TypeError('Expected a direct `markdown` parser');
 	}
 
-	let output: string;
+	const output = await parser.preprocess('foo\n', {
+		plugins: [pluginMarkdownHTML],
+	} as unknown as ParserOptions);
 
-	try {
-		output = await parser.preprocess('value\n', {
-			plugins: [pluginMarkdownHTML],
-		} as ParserOptions);
-	} finally {
-		markdownParsers.markdown.preprocess = nativePreprocess;
-	}
-
-	expect(output).toBe('Native value\n');
+	expect(output).toBe('Native foo\n');
 });
 
 test('formats raw HTML in Markdown', async () => {
-	const output = await format(TEST_MARKDOWN, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
-	});
+	};
+
+	const output = await format(TEST_MARKDOWN, options);
 
 	expect(output).toMatchSnapshot();
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('formats raw HTML with the `remark` parser', async () => {
-	const output = await format('<div id = "foo">value</div>\n', {
-		parser: 'remark',
+	const input = '<div id = "foo">bar</div>\n';
+	const options = {
+		parser: 'remark' as const,
 		plugins: [pluginMarkdownHTML],
-	});
+	};
+
+	const output = await format(input, options);
 
 	expect(output).toMatchInlineSnapshot(`
-		"<div id="foo">value</div>
+		"<div id="foo">bar</div>
 		"
 	`);
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('formats raw HTML with compatible aliased parsers', async () => {
@@ -197,36 +204,41 @@ test('formats raw HTML with compatible aliased parsers', async () => {
 		parsers: { 'markdown-alias': markdownParsers.markdown },
 	};
 
-	const output = await format('<div id = "foo">value</div>\n', {
+	const input = '<div id = "foo">bar</div>\n';
+	const options = {
 		parser: 'markdown-alias',
 		plugins: [aliasPlugin, pluginMarkdownHTML],
-	});
+	};
+
+	const output = await format(input, options);
 
 	expect(output).toMatchInlineSnapshot(`
-		"<div id="foo">value</div>
+		"<div id="foo">bar</div>
 		"
 	`);
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'composes prior `%s` parser and printer preprocess hooks',
+	'composes prior parser and printer preprocess hooks with the `%s` parser',
 	async (parserName) => {
 		const priorPlugin = createPriorPlugin(parserName);
-
-		const output = await format('ignored\n', {
+		const options = {
 			parser: parserName,
 			plugins: [priorPlugin, pluginMarkdownHTML],
-		});
+		};
+
+		const output = await format('ignored\n', options);
 
 		expect(output).toMatchInlineSnapshot(`
-			"Parser <span id="bar">value</span>
+			"Parser <span id="bar">baz</span>
 			"
 		`);
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'skips prior `%s` printer preprocessors with incompatible structural hooks',
+	'skips prior `mdast` printer preprocessors with incompatible structural hooks with the `%s` parser',
 	async (parserName) => {
 		const priorPlugin: Plugin = {
 			parsers: {
@@ -244,17 +256,17 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			},
 		};
 
-		const priorOutput = await format('value\n', {
+		const priorOutput = await format('foo\n', {
 			parser: parserName,
 			plugins: [priorPlugin],
 		});
 
-		const expectedOutput = await format('value\n', {
+		const expectedOutput = await format('foo\n', {
 			parser: parserName,
 			plugins: [pluginMarkdownHTML],
 		});
 
-		const output = await format('value\n', {
+		const output = await format('foo\n', {
 			parser: parserName,
 			plugins: [priorPlugin, pluginMarkdownHTML],
 		});
@@ -280,7 +292,6 @@ test('formats HTML with optional end tags', async () => {
 		</ul>
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
@@ -300,137 +311,161 @@ test('formats inline HTML in paragraphs', async () => {
 		  class="bar">baz</span> After
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
-test('formats inline raw-text HTML elements', async () => {
-	const options = {
-		parser: 'markdown' as const,
-		plugins: [pluginMarkdownHTML],
-	};
-
-	for (const tagName of ['script', 'style', 'textarea', 'title']) {
+test.each(['script', 'style', 'textarea', 'title'])(
+	'formats inline raw text `%s` elements',
+	async (tagName) => {
 		const input = `Before <${tagName} id = "foo" class = "bar">baz</${tagName}> After\n`;
+		const options = {
+			parser: 'markdown' as const,
+			plugins: [pluginMarkdownHTML],
+		};
+
 		const output = await format(input, options);
 
 		expect(output).toBe(
 			`Before <${tagName} id="foo" class="bar">baz</${tagName}> After\n`
 		);
-
 		await expect(format(output, options)).resolves.toBe(output);
-	}
-});
-
-test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves inline raw-text contents with the `%s` parser',
-	async (parserName) => {
-		const cases = [
-			{ tagName: 'script', content: `const html = "<b id='foo'>";` },
-			{
-				tagName: 'style',
-				content: `b::before { content: "<b id='foo'>"; }`,
-			},
-			{ tagName: 'textarea', content: `<b id='foo'>bar</b>` },
-			{ tagName: 'title', content: `<b id='foo'>bar</b>` },
-		];
-
-		for (const embeddedLanguageFormatting of ['auto', 'off'] as const) {
-			const options = {
-				embeddedLanguageFormatting,
-				parser: parserName,
-				plugins: [pluginMarkdownHTML],
-			};
-
-			for (const { content, tagName } of cases) {
-				const input = `Before <${tagName} id = "foo">${content}</${tagName}> <span id = "bar">baz</span> After\n`;
-				const output = await format(input, options);
-				const nativeOutput = await format(input, {
-					embeddedLanguageFormatting,
-					parser: parserName,
-				});
-
-				expect(output).toBe(
-					nativeOutput
-						.replace('id = "foo"', 'id="foo"')
-						.replace('id = "bar"', 'id="bar"')
-				);
-
-				await expect(format(output, options)).resolves.toBe(output);
-			}
-		}
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'formats raw-text tags across Markdown parents with the `%s` parser',
-	async (parserName) => {
-		const inputs = [
-			'Before <title id = "foo">bar **baz</title> qux**\n',
-			'Before **<title id = "foo">bar** baz</title> After\n',
-			'Before <textarea id = "foo">bar\n\nbaz</textarea> After\n',
-			'Before <textarea id = "foo">bar\n\n<b id="baz">qux</b>\n\n</textarea> After\n',
-			'Before <textarea id = "foo">bar\n\n<div></textarea><section>\n\n<aside>baz</aside>\n</section>\n',
-		];
+test.each([
+	['script', 'auto', 'markdown'],
+	['script', 'auto', 'remark'],
+	['script', 'off', 'markdown'],
+	['script', 'off', 'remark'],
+	['style', 'auto', 'markdown'],
+	['style', 'auto', 'remark'],
+	['style', 'off', 'markdown'],
+	['style', 'off', 'remark'],
+	['textarea', 'auto', 'markdown'],
+	['textarea', 'auto', 'remark'],
+	['textarea', 'off', 'markdown'],
+	['textarea', 'off', 'remark'],
+	['title', 'auto', 'markdown'],
+	['title', 'auto', 'remark'],
+	['title', 'off', 'markdown'],
+	['title', 'off', 'remark'],
+] as const)(
+	'preserves inline `%s` contents when `embeddedLanguageFormatting` is `%s` with the `%s` parser',
+	async (tagName, embeddedLanguageFormatting, parserName) => {
+		const content = {
+			script: `const html = "<b id='foo'>";`,
+			style: `b::before { content: "<b id='foo'>"; }`,
+			textarea: `<b id='foo'>bar</b>`,
+			title: `<b id='foo'>bar</b>`,
+		}[tagName];
+		const input = `Before <${tagName} id = "foo">${content}</${tagName}> <span id = "bar">baz</span> After\n`;
+		const options = {
+			embeddedLanguageFormatting,
+			parser: parserName,
+			plugins: [pluginMarkdownHTML],
+		};
+
+		const output = await format(input, options);
+		const nativeOutput = await format(input, {
+			embeddedLanguageFormatting,
+			parser: parserName,
+		});
+
+		expect(output).toBe(
+			nativeOutput
+				.replace('id = "foo"', 'id="foo"')
+				.replace('id = "bar"', 'id="bar"')
+		);
+		await expect(format(output, options)).resolves.toBe(output);
+	}
+);
+
+test.each([
+	['markdown', 'Before <title id = "foo">bar **baz</title> qux**\n'],
+	['markdown', 'Before **<title id = "foo">bar** baz</title> After\n'],
+	['markdown', 'Before <textarea id = "foo">bar\n\nbaz</textarea> After\n'],
+	[
+		'markdown',
+		'Before <textarea id = "foo">bar\n\n<b id="baz">qux</b>\n\n</textarea> After\n',
+	],
+	[
+		'markdown',
+		'Before <textarea id = "foo">bar\n\n<div></textarea><section>\n\n<aside>baz</aside>\n</section>\n',
+	],
+	['remark', 'Before <title id = "foo">bar **baz</title> qux**\n'],
+	['remark', 'Before **<title id = "foo">bar** baz</title> After\n'],
+	['remark', 'Before <textarea id = "foo">bar\n\nbaz</textarea> After\n'],
+	[
+		'remark',
+		'Before <textarea id = "foo">bar\n\n<b id="baz">qux</b>\n\n</textarea> After\n',
+	],
+	[
+		'remark',
+		'Before <textarea id = "foo">bar\n\n<div></textarea><section>\n\n<aside>baz</aside>\n</section>\n',
+	],
+] as const)(
+	'formats raw text tags across Markdown parents with the `%s` parser',
+	async (parserName, input) => {
 		const options = {
 			parser: parserName,
 			plugins: [pluginMarkdownHTML],
 		};
 
-		for (const input of inputs) {
-			const output = await format(input, options);
-			const nativeOutput = await format(input, { parser: parserName });
+		const output = await format(input, options);
+		const nativeOutput = await format(input, { parser: parserName });
 
-			expect(output).toBe(nativeOutput.replace('id = "foo"', 'id="foo"'));
-
-			await expect(format(output, options)).resolves.toBe(output);
-		}
+		expect(output).toBe(nativeOutput.replace('id = "foo"', 'id="foo"'));
+		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'applies line endings once with the `%s` parser',
-	async (parserName) => {
-		const inputs = [
-			'<div id="foo" class="bar">baz</div>\n',
-			'> <div id="foo" class="bar">baz</div>\n',
-			'- <div id="foo" class="bar">baz</div>\n',
-			'Before <span id="foo" class="bar">baz</span> After\n',
-		];
-		const cases = [
-			{ endOfLine: 'cr', separator: '\r' },
-			{ endOfLine: 'crlf', separator: '\r\n' },
-			{ endOfLine: 'lf', separator: '\n' },
-		] as const;
+test.each([
+	['cr', 'markdown', '<div id="foo" class="bar">baz</div>\n'],
+	['cr', 'markdown', '> <div id="foo" class="bar">baz</div>\n'],
+	['cr', 'markdown', '- <div id="foo" class="bar">baz</div>\n'],
+	['cr', 'markdown', 'Before <span id="foo" class="bar">baz</span> After\n'],
+	['cr', 'remark', '<div id="foo" class="bar">baz</div>\n'],
+	['cr', 'remark', '> <div id="foo" class="bar">baz</div>\n'],
+	['cr', 'remark', '- <div id="foo" class="bar">baz</div>\n'],
+	['cr', 'remark', 'Before <span id="foo" class="bar">baz</span> After\n'],
+	['crlf', 'markdown', '<div id="foo" class="bar">baz</div>\n'],
+	['crlf', 'markdown', '> <div id="foo" class="bar">baz</div>\n'],
+	['crlf', 'markdown', '- <div id="foo" class="bar">baz</div>\n'],
+	[
+		'crlf',
+		'markdown',
+		'Before <span id="foo" class="bar">baz</span> After\n',
+	],
+	['crlf', 'remark', '<div id="foo" class="bar">baz</div>\n'],
+	['crlf', 'remark', '> <div id="foo" class="bar">baz</div>\n'],
+	['crlf', 'remark', '- <div id="foo" class="bar">baz</div>\n'],
+	['crlf', 'remark', 'Before <span id="foo" class="bar">baz</span> After\n'],
+] as const)(
+	'applies `%s` line endings once with the `%s` parser',
+	async (endOfLine, parserName, input) => {
+		const options = {
+			endOfLine,
+			parser: parserName,
+			plugins: [pluginMarkdownHTML],
+			singleAttributePerLine: true,
+		};
+		const separator = { cr: '\r', crlf: '\r\n' }[endOfLine];
+		const expectedOutput = await format(input, {
+			...options,
+			endOfLine: 'lf',
+		});
 
-		for (const input of inputs) {
-			const options = {
-				parser: parserName,
-				plugins: [pluginMarkdownHTML],
-				singleAttributePerLine: true,
-			};
-			const expectedOutput = await format(input, {
-				...options,
-				endOfLine: 'lf',
-			});
+		const output = await format(input, options);
 
-			for (const { endOfLine, separator } of cases) {
-				const output = await format(input, { ...options, endOfLine });
-
-				expect(output).toBe(expectedOutput.replaceAll('\n', separator));
-
-				await expect(
-					format(output, { ...options, endOfLine })
-				).resolves.toBe(output);
-			}
-		}
+		expect(output).toBe(expectedOutput.replaceAll('\n', separator));
+		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
 
 test('formats block HTML in block quotes and list items', async () => {
 	const input = `> <div id = "foo" class = "bar"><span>baz</span></div>
 
-- Item
+- qux
 
   <div id = "foo" class = "bar"><span>baz</span></div>
 `;
@@ -450,7 +485,7 @@ test('formats block HTML in block quotes and list items', async () => {
 		>   <span>baz</span>
 		> </div>
 
-		- Item
+		- qux
 
 		  <div
 		    id="foo"
@@ -460,61 +495,58 @@ test('formats block HTML in block quotes and list items', async () => {
 		  </div>
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
-test('keeps inline block HTML stable when wrapping prose', async () => {
-	const options = {
-		parser: 'markdown' as const,
-		plugins: [pluginMarkdownHTML],
-		printWidth: 10,
-		proseWrap: 'always' as const,
-	};
-
-	const cases = [
-		{
-			input: 'Before <address id = "foo" class = "bar">baz</address> After\n',
-			output: `Before <address
+test.each([
+	{
+		input: 'Before <address id = "foo" class = "bar">baz</address> After\n',
+		output: `Before <address
   id="foo"
   class="bar">baz</address>
 After
 `,
-		},
-		{
-			input: 'Before <hgroup id = "foo" class = "bar">baz</hgroup> After\n',
-			output: `Before <hgroup
+	},
+	{
+		input: 'Before <hgroup id = "foo" class = "bar">baz</hgroup> After\n',
+		output: `Before <hgroup
   id="foo"
   class="bar">baz</hgroup>
 After
 `,
-		},
-		{
-			input: 'Before <meta id = "foo" class = "bar"> After\n',
-			output: `Before <meta
+	},
+	{
+		input: 'Before <meta id = "foo" class = "bar"> After\n',
+		output: `Before <meta
   id="foo"
   class="bar" />
 After
 `,
-		},
-		{
-			input: 'Before <source id = "foo" class = "bar"> After\n',
-			output: `Before <source
+	},
+	{
+		input: 'Before <source id = "foo" class = "bar"> After\n',
+		output: `Before <source
   id="foo"
   class="bar" />
 After
 `,
-		},
-	];
+	},
+])(
+	'keeps inline block HTML stable when wrapping prose',
+	async ({ input, output: expectedOutput }) => {
+		const options = {
+			parser: 'markdown' as const,
+			plugins: [pluginMarkdownHTML],
+			printWidth: 10,
+			proseWrap: 'always' as const,
+		};
 
-	for (const { input, output: expectedOutput } of cases) {
 		const output = await format(input, options);
 
 		expect(output).toBe(expectedOutput);
-
 		await expect(format(output, options)).resolves.toBe(output);
 	}
-});
+);
 
 test('keeps closing block HTML stable when wrapping prose', async () => {
 	const input = 'Before <div>foo bar baz qux </div> After\n';
@@ -534,11 +566,10 @@ test('keeps closing block HTML stable when wrapping prose', async () => {
 		After
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
-test('keeps closing raw-text HTML stable when wrapping prose', async () => {
+test('keeps closing raw text HTML stable when wrapping prose', async () => {
 	const input = 'Before <title>foo bar baz qux </title> After\n';
 	const options = {
 		parser: 'markdown' as const,
@@ -556,15 +587,14 @@ test('keeps closing raw-text HTML stable when wrapping prose', async () => {
 		After
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'keeps raw-text HTML tokens inline when wrapping prose with the `%s` parser',
+	'keeps raw text HTML tokens inline when wrapping prose with the `%s` parser',
 	async (parserName) => {
 		const input =
-			'Before <title>foo bar baz qux <div>text</div></title> **after**\n';
+			'Before <title>foo bar baz qux <div>quux</div></title> **after**\n';
 		const options = {
 			parser: parserName,
 			plugins: [pluginMarkdownHTML],
@@ -575,9 +605,8 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		const output = await format(input, options);
 
 		expect(output).toBe(
-			'Before <title>foo\nbar baz\nqux <div>text</div></title>\n**after**\n'
+			'Before <title>foo\nbar baz\nqux <div>quux</div></title>\n**after**\n'
 		);
-
 		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
@@ -603,7 +632,6 @@ test('keeps inline HTML compact in headings and table cells', async () => {
 		| -------------------------------------------------- |
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
@@ -621,114 +649,199 @@ test('preserves blank lines between nested HTML blocks', async () => {
 	expect(output).toBe(input);
 });
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves raw-block text after closing tags with the `%s` parser',
-	async (parserName) => {
-		const inputs = [
-			'<div>\n\nfoo\n\n</div>*bar*\n',
-			'<div>\n\nfoo\n\n</div>\n_bar_\n',
-			'<div>\n<section>\n\nfoo\n\n</section> </div> *bar*\n',
-			'> <div>\n>\n> foo\n>\n> </div>*bar*\n',
-			'- <div>\n\n  foo\n\n  </div>*bar*\n',
-		];
+test.each([
+	['markdown', '<div>\n\nfoo\n\n</div>*bar*\n'],
+	['markdown', '<div>\n\nfoo\n\n</div>\n_bar_\n'],
+	['markdown', '<div>\n<section>\n\nfoo\n\n</section> </div> *bar*\n'],
+	['markdown', '> <div>\n>\n> foo\n>\n> </div>*bar*\n'],
+	['markdown', '- <div>\n\n  foo\n\n  </div>*bar*\n'],
+	['remark', '<div>\n\nfoo\n\n</div>*bar*\n'],
+	['remark', '<div>\n\nfoo\n\n</div>\n_bar_\n'],
+	['remark', '<div>\n<section>\n\nfoo\n\n</section> </div> *bar*\n'],
+	['remark', '> <div>\n>\n> foo\n>\n> </div>*bar*\n'],
+	['remark', '- <div>\n\n  foo\n\n  </div>*bar*\n'],
+] as const)(
+	'preserves raw block text after closing tags with the `%s` parser',
+	async (parserName, input) => {
 		const options = {
 			parser: parserName,
 			plugins: [pluginMarkdownHTML],
 		};
 
-		for (const input of inputs) {
-			const output = await format(input, options);
-			const nativeOutput = await format(input, { parser: parserName });
+		const output = await format(input, options);
+		const nativeOutput = await format(input, { parser: parserName });
 
-			expect(output).toBe(nativeOutput);
-
-			await expect(format(output, options)).resolves.toBe(output);
-		}
+		expect(output).toBe(nativeOutput);
+		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
+test.each([
+	['markdown', '<div title="\n\n<div>"></div>\n', ''],
+	['markdown', '<div title="\n\n<div>"></div>\n', '  '],
+	['markdown', '<div title="\n\n<div>"></div>\n', '> '],
+	['markdown', '<div title="\n  \n<div>"></div>\n', ''],
+	['markdown', '<div title="\n  \n<div>"></div>\n', '  '],
+	['markdown', '<div title="\n  \n<div>"></div>\n', '> '],
+	['markdown', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', ''],
+	['markdown', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', '  '],
+	['markdown', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', '> '],
+	['remark', '<div title="\n\n<div>"></div>\n', ''],
+	['remark', '<div title="\n\n<div>"></div>\n', '  '],
+	['remark', '<div title="\n\n<div>"></div>\n', '> '],
+	['remark', '<div title="\n  \n<div>"></div>\n', ''],
+	['remark', '<div title="\n  \n<div>"></div>\n', '  '],
+	['remark', '<div title="\n  \n<div>"></div>\n', '> '],
+	['remark', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', ''],
+	['remark', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', '  '],
+	['remark', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', '> '],
+] as const)(
 	'preserves significant blank lines across HTML nodes with the `%s` parser',
-	async (parserName) => {
-		const inputs = [
-			'<div title="\n\n<div>"></div>\n',
-			'<div title="\n  \n<div>"></div>\n',
-			'<div><textarea>foo\n\n<div>bar</textarea></div>\n',
-		];
+	async (parserName, input, prefix) => {
 		const options = {
 			parser: parserName,
 			plugins: [pluginMarkdownHTML],
 		};
 
-		for (const input of inputs) {
-			const htmlOutput = await format(input, { parser: 'html' });
+		const wrap = (text: string): string => {
+			const content = text
+				.trimEnd()
+				.split('\n')
+				.map((line) => (line ? `${prefix}${line}` : prefix.trimEnd()))
+				.join('\n');
+			return `${prefix === '  ' ? '- baz\n\n' : ''}${content}\n`;
+		};
 
-			for (const prefix of ['', '  ', '> ']) {
-				const wrap = (text: string): string => {
-					const content = text
-						.trimEnd()
-						.split('\n')
-						.map((line) =>
-							line ? `${prefix}${line}` : prefix.trimEnd()
-						)
-						.join('\n');
-					return `${prefix === '  ' ? '- Item\n\n' : ''}${content}\n`;
-				};
+		const htmlOutput = await format(input, { parser: 'html' });
 
-				const output = await format(wrap(input), options);
-				const expectedOutput = wrap(htmlOutput);
+		const output = await format(wrap(input), options);
+		const expectedOutput = wrap(htmlOutput);
 
-				expect(output).toBe(expectedOutput);
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	}
+);
 
-				await expect(format(output, options)).resolves.toBe(output);
-			}
-		}
+test.each([
+	{
+		embeddedLanguageFormatting: 'auto',
+		input: '- foo\n\n  <div title="\n\n  <div>"></div>\n',
+		output: '- foo\n\n  <div\n    title="\n\n  <div>"\n  ></div>\n',
+		parserName: 'markdown',
+	},
+	{
+		embeddedLanguageFormatting: 'auto',
+		input: '> - foo\n>\n>   <div title="\n>\n>   <div>"></div>\n',
+		output: '> - foo\n>\n>   <div\n>     title="\n>\n>   <div>"\n>   ></div>\n',
+		parserName: 'markdown',
+	},
+	{
+		embeddedLanguageFormatting: 'auto',
+		input: '> <div title="\n>\n> <div>"></div>\n',
+		output: '> <div\n>   title="\n>\n> <div>"\n> ></div>\n',
+		parserName: 'markdown',
+	},
+	{
+		embeddedLanguageFormatting: 'auto',
+		input: '> > <div title="\n> >\n> > <div>"></div>\n',
+		output: '> > <div\n> >   title="\n> >\n> > <div>"\n> > ></div>\n',
+		parserName: 'markdown',
+	},
+	{
+		embeddedLanguageFormatting: 'off',
+		input: '- foo\n\n  <div title="\n\n  <div>"></div>\n',
+		output: '- foo\n\n  <div\n    title="\n\n  <div>"\n  ></div>\n',
+		parserName: 'markdown',
+	},
+	{
+		embeddedLanguageFormatting: 'off',
+		input: '> - foo\n>\n>   <div title="\n>\n>   <div>"></div>\n',
+		output: '> - foo\n>\n>   <div\n>     title="\n>\n>   <div>"\n>   ></div>\n',
+		parserName: 'markdown',
+	},
+	{
+		embeddedLanguageFormatting: 'off',
+		input: '> <div title="\n>\n> <div>"></div>\n',
+		output: '> <div\n>   title="\n>\n> <div>"\n> ></div>\n',
+		parserName: 'markdown',
+	},
+	{
+		embeddedLanguageFormatting: 'off',
+		input: '> > <div title="\n> >\n> > <div>"></div>\n',
+		output: '> > <div\n> >   title="\n> >\n> > <div>"\n> > ></div>\n',
+		parserName: 'markdown',
+	},
+	{
+		embeddedLanguageFormatting: 'auto',
+		input: '- foo\n\n  <div title="\n\n  <div>"></div>\n',
+		output: '- foo\n\n  <div\n    title="\n\n  <div>"\n  ></div>\n',
+		parserName: 'remark',
+	},
+	{
+		embeddedLanguageFormatting: 'auto',
+		input: '> - foo\n>\n>   <div title="\n>\n>   <div>"></div>\n',
+		output: '> - foo\n>\n>   <div\n>     title="\n>\n>   <div>"\n>   ></div>\n',
+		parserName: 'remark',
+	},
+	{
+		embeddedLanguageFormatting: 'auto',
+		input: '> <div title="\n>\n> <div>"></div>\n',
+		output: '> <div\n>   title="\n>\n> <div>"\n> ></div>\n',
+		parserName: 'remark',
+	},
+	{
+		embeddedLanguageFormatting: 'auto',
+		input: '> > <div title="\n> >\n> > <div>"></div>\n',
+		output: '> > <div\n> >   title="\n> >\n> > <div>"\n> > ></div>\n',
+		parserName: 'remark',
+	},
+	{
+		embeddedLanguageFormatting: 'off',
+		input: '- foo\n\n  <div title="\n\n  <div>"></div>\n',
+		output: '- foo\n\n  <div\n    title="\n\n  <div>"\n  ></div>\n',
+		parserName: 'remark',
+	},
+	{
+		embeddedLanguageFormatting: 'off',
+		input: '> - foo\n>\n>   <div title="\n>\n>   <div>"></div>\n',
+		output: '> - foo\n>\n>   <div\n>     title="\n>\n>   <div>"\n>   ></div>\n',
+		parserName: 'remark',
+	},
+	{
+		embeddedLanguageFormatting: 'off',
+		input: '> <div title="\n>\n> <div>"></div>\n',
+		output: '> <div\n>   title="\n>\n> <div>"\n> ></div>\n',
+		parserName: 'remark',
+	},
+	{
+		embeddedLanguageFormatting: 'off',
+		input: '> > <div title="\n> >\n> > <div>"></div>\n',
+		output: '> > <div\n> >   title="\n> >\n> > <div>"\n> > ></div>\n',
+		parserName: 'remark',
+	},
+] as const)(
+	'prints empty HTML lines without trailing container whitespace when `embeddedLanguageFormatting` is `$embeddedLanguageFormatting` with the `$parserName` parser',
+	async ({
+		embeddedLanguageFormatting,
+		input,
+		output: expectedOutput,
+		parserName,
+	}) => {
+		const options = {
+			embeddedLanguageFormatting,
+			parser: parserName,
+			plugins: [pluginMarkdownHTML],
+		};
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'prints empty HTML lines without trailing container whitespace with the `%s` parser',
-	async (parserName) => {
-		const cases = [
-			{
-				input: '- Item\n\n  <div title="\n\n  <div>"></div>\n',
-				output: '- Item\n\n  <div\n    title="\n\n  <div>"\n  ></div>\n',
-			},
-			{
-				input: '> - Item\n>\n>   <div title="\n>\n>   <div>"></div>\n',
-				output: '> - Item\n>\n>   <div\n>     title="\n>\n>   <div>"\n>   ></div>\n',
-			},
-			{
-				input: '> <div title="\n>\n> <div>"></div>\n',
-				output: '> <div\n>   title="\n>\n> <div>"\n> ></div>\n',
-			},
-			{
-				input: '> > <div title="\n> >\n> > <div>"></div>\n',
-				output: '> > <div\n> >   title="\n> >\n> > <div>"\n> > ></div>\n',
-			},
-		];
-
-		for (const embeddedLanguageFormatting of ['auto', 'off'] as const) {
-			const options = {
-				embeddedLanguageFormatting,
-				parser: parserName,
-				plugins: [pluginMarkdownHTML],
-			};
-
-			for (const { input, output: expectedOutput } of cases) {
-				const output = await format(input, options);
-
-				expect(output).toBe(expectedOutput);
-				expect(output).not.toMatch(/[\t ]+$/m);
-
-				await expect(format(output, options)).resolves.toBe(output);
-			}
-		}
-	}
-);
-
-test.each(MARKDOWN_PARSER_NAMES)(
-	'keeps native printing for preserved raw-text contents with the `%s` parser',
+	'keeps native printing for preserved raw text contents with the `%s` parser',
 	async (parserName) => {
 		const input =
 			'> Before <textarea>foo\n>\n> <script>\n>\n> bar</script>\n>\n> </textarea>\n';
@@ -741,7 +854,6 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		const nativeOutput = await format(input, { parser: parserName });
 
 		expect(output).toBe(nativeOutput);
-
 		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
@@ -767,7 +879,6 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			.join('\n');
 
 		expect(output).toBe(`${expectedOutput}\n`);
-
 		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
@@ -781,7 +892,7 @@ test('preserves blank lines after a tag split across HTML nodes', async () => {
 </div>
 </section>
 
-<p>separate</p>
+<p>foo</p>
 `;
 	const options = {
 		parser: 'markdown' as const,
@@ -799,10 +910,9 @@ test('preserves blank lines after a tag split across HTML nodes', async () => {
 		  ></div>
 		</section>
 
-		<p>separate</p>
+		<p>foo</p>
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
@@ -828,46 +938,48 @@ test('formats a root tag split across HTML nodes', async () => {
 		></div>
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('respects `bracketSameLine`', async () => {
-	const input = '<div first="one" second="two" third="three">value</div>\n';
+	const input = '<div id="foo" class="bar" title="baz">qux</div>\n';
+	const options = {
+		bracketSameLine: false,
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		printWidth: 20,
+		singleAttributePerLine: true,
+	};
+	const bracketSameLineOptions = { ...options, bracketSameLine: true };
 
-	const outputs: string[] = [];
-
-	for (const bracketSameLine of [false, true]) {
-		outputs.push(
-			await format(input, {
-				bracketSameLine,
-				parser: 'markdown',
-				plugins: [pluginMarkdownHTML],
-				printWidth: 20,
-				singleAttributePerLine: true,
-			})
-		);
-	}
+	const outputs = {
+		false: await format(input, options),
+		true: await format(input, bracketSameLineOptions),
+	};
 
 	expect(outputs).toMatchInlineSnapshot(`
-		[
-		  "<div
-		  first="one"
-		  second="two"
-		  third="three"
+		{
+		  "false": "<div
+		  id="foo"
+		  class="bar"
+		  title="baz"
 		>
-		  value
+		  qux
 		</div>
 		",
-		  "<div
-		  first="one"
-		  second="two"
-		  third="three">
-		  value
+		  "true": "<div
+		  id="foo"
+		  class="bar"
+		  title="baz">
+		  qux
 		</div>
 		",
-		]
+		}
 	`);
+	await expect(format(outputs.false, options)).resolves.toBe(outputs.false);
+	await expect(format(outputs.true, bracketSameLineOptions)).resolves.toBe(
+		outputs.true
+	);
 });
 
 test('respects `checkIgnorePragma`', async () => {
@@ -889,62 +1001,62 @@ test('respects `checkIgnorePragma`', async () => {
 		<div id = "foo" class = "bar">baz</div>
 		"
 	`);
-
-	await expect(format(output, options)).resolves.toBe(output);
 });
 
-test.each(MARKDOWN_PARSER_NAMES)(
+test.each([
+	['markdown', ''],
+	['markdown', '> '],
+	['markdown', '- quux\n\n  '],
+	['remark', ''],
+	['remark', '> '],
+	['remark', '- quux\n\n  '],
+] as const)(
 	'respects `cursorOffset` with the `%s` parser',
-	async (parser) => {
-		const htmlFragment =
-			'<div id = "foo" class = "bar"><span>alpha§omega</span></div>';
+	async (parserName, prefix) => {
+		const input = `${prefix}<div id = "foo" class = "bar"><span>baz|qux</span></div>\n`;
+		const cursorOffset = input.indexOf('|');
 
-		const inputs = [
-			`${htmlFragment}\n`,
-			`> ${htmlFragment}\n`,
-			`- Item\n\n  ${htmlFragment}\n`,
-		];
+		const { cursorOffset: formattedCursorOffset, formatted } =
+			await formatWithCursor(input, {
+				cursorOffset,
+				parser: parserName,
+				plugins: [pluginMarkdownHTML],
+				singleAttributePerLine: true,
+			});
 
-		for (const input of inputs) {
-			const cursorOffset = input.indexOf('§');
-
-			const { cursorOffset: formattedCursorOffset, formatted } =
-				await formatWithCursor(input, {
-					cursorOffset,
-					parser,
-					plugins: [pluginMarkdownHTML],
-					singleAttributePerLine: true,
-				});
-
-			expect(formatted).not.toBe(input);
-			expect(formatted[formattedCursorOffset]).toBe('§');
-			expect(formattedCursorOffset).toBe(formatted.indexOf('§'));
-		}
+		expect(formatted).not.toBe(input);
+		expect(formatted[formattedCursorOffset]).toBe('|');
+		expect(formattedCursorOffset).toBe(formatted.indexOf('|'));
 	}
 );
 
 test('respects `embeddedLanguageFormatting`', async () => {
-	const input = `<script>const value={foo:1,bar:2}</script>
+	const input = `<script>const foo={bar:1,baz:2}</script>
 
 <style>.foo{display:block;color:red;}</style>
 `;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+	const autoOptions = {
+		...options,
+		embeddedLanguageFormatting: 'auto' as const,
+	};
+	const offOptions = {
+		...options,
+		embeddedLanguageFormatting: 'off' as const,
+	};
 
-	const outputs: string[] = [];
-
-	for (const embeddedLanguageFormatting of ['auto', 'off'] as const) {
-		outputs.push(
-			await format(input, {
-				embeddedLanguageFormatting,
-				parser: 'markdown',
-				plugins: [pluginMarkdownHTML],
-			})
-		);
-	}
+	const outputs = {
+		auto: await format(input, autoOptions),
+		off: await format(input, offOptions),
+	};
 
 	expect(outputs).toMatchInlineSnapshot(`
-		[
-		  "<script>
-		  const value = { foo: 1, bar: 2 };
+		{
+		  "auto": "<script>
+		  const foo = { bar: 1, baz: 2 };
 		</script>
 
 		<style>
@@ -954,26 +1066,31 @@ test('respects `embeddedLanguageFormatting`', async () => {
 		  }
 		</style>
 		",
-		  "<script>
-		  const value={foo:1,bar:2}
+		  "off": "<script>
+		  const foo={bar:1,baz:2}
 		</script>
 
 		<style>
 		  .foo{display:block;color:red;}
 		</style>
 		",
-		]
+		}
 	`);
+	await expect(format(outputs.auto, autoOptions)).resolves.toBe(outputs.auto);
+	await expect(format(outputs.off, offOptions)).resolves.toBe(outputs.off);
 });
 
 test('respects `htmlWhitespaceSensitivity`', async () => {
-	const output = await format(TEST_MARKDOWN, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
-		htmlWhitespaceSensitivity: 'strict',
-	});
+		htmlWhitespaceSensitivity: 'strict' as const,
+	};
+
+	const output = await format(TEST_MARKDOWN, options);
 
 	expect(output).toMatchSnapshot();
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('respects `insertPragma`', async () => {
@@ -992,90 +1109,106 @@ test('respects `insertPragma`', async () => {
 		<div id="foo" class="bar">baz</div>
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
-test('respects `prettier-ignore` comments', async () => {
-	const inputs = [
-		`<!-- prettier-ignore -->
-<div id = "foo" class = "bar">value</div>
-`,
-		`<div>
-<!-- prettier-ignore -->
-<span id = "foo" class = "bar">value</span>
-</div>
-`,
-	];
+test('respects `prettier-ignore` comments before HTML blocks', async () => {
+	const input = `<!-- prettier-ignore -->
+<div id = "foo" class = "bar">baz</div>
+`;
 
-	const outputs: string[] = [];
+	const output = await format(input, {
+		parser: 'markdown',
+		plugins: [pluginMarkdownHTML],
+	});
 
-	for (const input of inputs) {
-		outputs.push(
-			await format(input, {
-				parser: 'markdown',
-				plugins: [pluginMarkdownHTML],
-			})
-		);
-	}
-
-	expect(outputs).toMatchInlineSnapshot(`
-		[
-		  "<!-- prettier-ignore -->
-		<div id = "foo" class = "bar">value</div>
-		",
-		  "<div>
-		  <!-- prettier-ignore -->
-		  <span id = "foo" class = "bar">value</span>
-		</div>
-		",
-		]
+	expect(output).toMatchInlineSnapshot(`
+		"<!-- prettier-ignore -->
+		<div id = "foo" class = "bar">baz</div>
+		"
 	`);
 });
 
-test.each(MARKDOWN_PARSER_NAMES)(
+test('respects `prettier-ignore` comments inside HTML blocks', async () => {
+	const input = `<div>
+<!-- prettier-ignore -->
+<span id = "foo" class = "bar">baz</span>
+</div>
+`;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+
+	const output = await format(input, options);
+
+	expect(output).toMatchInlineSnapshot(`
+		"<div>
+		  <!-- prettier-ignore -->
+		  <span id = "foo" class = "bar">baz</span>
+		</div>
+		"
+	`);
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test.each([
+	['markdown', '<!-- prettier-ignore -->\n\n<div>\n\n<p>foo</p>\n</div>\n'],
+	[
+		'markdown',
+		'> <!-- prettier-ignore -->\n>\n> <div>\n>\n> <p>foo</p>\n> </div>\n',
+	],
+	[
+		'markdown',
+		'- <!-- prettier-ignore -->\n\n  <div>\n\n  <p>foo</p>\n  </div>\n',
+	],
+	['remark', '<!-- prettier-ignore -->\n\n<div>\n\n<p>foo</p>\n</div>\n'],
+	[
+		'remark',
+		'> <!-- prettier-ignore -->\n>\n> <div>\n>\n> <p>foo</p>\n> </div>\n',
+	],
+	[
+		'remark',
+		'- <!-- prettier-ignore -->\n\n  <div>\n\n  <p>foo</p>\n  </div>\n',
+	],
+] as const)(
 	'preserves ignored HTML groups with the `%s` parser',
-	async (parserName) => {
-		const inputs = [
-			'<!-- prettier-ignore -->\n\n<div>\n\n<p>foo</p>\n</div>\n',
-			'> <!-- prettier-ignore -->\n>\n> <div>\n>\n> <p>foo</p>\n> </div>\n',
-			'- <!-- prettier-ignore -->\n\n  <div>\n\n  <p>foo</p>\n  </div>\n',
-		];
+	async (parserName, input) => {
 		const options = {
 			parser: parserName,
 			plugins: [pluginMarkdownHTML],
 		};
 
-		for (const input of inputs) {
-			const output = await format(input, options);
-			const nativeOutput = await format(input, { parser: parserName });
+		const output = await format(input, options);
+		const nativeOutput = await format(input, { parser: parserName });
 
-			expect(output).toBe(nativeOutput);
-
-			await expect(format(output, options)).resolves.toBe(output);
-		}
+		expect(output).toBe(nativeOutput);
+		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
 
 test('respects `printWidth`', async () => {
-	const output = await format(TEST_MARKDOWN, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
 		printWidth: Number.POSITIVE_INFINITY,
-	});
+	};
+
+	const output = await format(TEST_MARKDOWN, options);
 
 	expect(output).toMatchSnapshot();
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('respects `rangeStart` and `rangeEnd`', async () => {
-	const input = `<div id = "before" class = "alpha">before</div>
+	const input = `<div id = "before" class = "foo">before</div>
 
-<div id = "selected" class = "beta">selected</div>
+<div id = "selected" class = "bar">selected</div>
 
-<div id = "after" class = "gamma">after</div>
+<div id = "after" class = "baz">after</div>
 `;
 
-	const selectedInput = '<div id = "selected" class = "beta">selected</div>';
+	const selectedInput = '<div id = "selected" class = "bar">selected</div>';
 
 	const rangeStart = input.indexOf(selectedInput);
 	const rangeEnd = rangeStart + selectedInput.length;
@@ -1084,14 +1217,15 @@ test('respects `rangeStart` and `rangeEnd`', async () => {
 		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
 	};
+	const fullRangeOptions = {
+		...options,
+		rangeEnd: input.length,
+		rangeStart: 0,
+	};
 
 	const [expectedFullOutput, fullRangeOutput] = await Promise.all([
 		format(input, options),
-		format(input, {
-			...options,
-			rangeEnd: input.length,
-			rangeStart: 0,
-		}),
+		format(input, fullRangeOptions),
 	]);
 
 	const [expectedPartialOutput, partialRangeOutput] = await Promise.all([
@@ -1123,7 +1257,6 @@ test('respects `requirePragma`', async () => {
 		<div id="foo" class="bar">baz</div>
 		"
 	`);
-
 	await expect(format(output, options)).resolves.toBe(output);
 	await expect(format(unformattedInput, options)).resolves.toBe(
 		unformattedInput
@@ -1131,206 +1264,252 @@ test('respects `requirePragma`', async () => {
 });
 
 test('respects `singleAttributePerLine`', async () => {
-	const standaloneInput = '<div id = "foo" class = "bar">value</div>\n';
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		singleAttributePerLine: false,
+	};
+	const singleAttributePerLineOptions = {
+		...options,
+		singleAttributePerLine: true,
+	};
 
-	for (const singleAttributePerLine of [true, false]) {
-		const options = {
-			parser: 'markdown' as const,
-			plugins: [pluginMarkdownHTML],
-			singleAttributePerLine,
-		};
+	const outputs = {
+		false: await format(TEST_MARKDOWN, options),
+		true: await format(TEST_MARKDOWN, singleAttributePerLineOptions),
+	};
 
-		const output = await format(TEST_MARKDOWN, options);
-		const expectedStandaloneOutput = await format(standaloneInput, options);
-		const standaloneOutput = await standaloneFormat(
-			standaloneInput,
-			options
-		);
-
-		expect(output).toMatchSnapshot();
-		expect(standaloneOutput).toBe(expectedStandaloneOutput);
-	}
+	expect(outputs).toMatchSnapshot();
+	await expect(format(outputs.false, options)).resolves.toBe(outputs.false);
+	await expect(
+		format(outputs.true, singleAttributePerLineOptions)
+	).resolves.toBe(outputs.true);
 });
 
 test('respects `tabWidth`', async () => {
-	const output = await format(TEST_MARKDOWN, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
 		tabWidth: 4,
-	});
+	};
+
+	const output = await format(TEST_MARKDOWN, options);
 
 	expect(output).toMatchSnapshot();
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('respects `useTabs`', async () => {
-	const output = await format(TEST_MARKDOWN, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
 		useTabs: true,
-	});
+	};
+
+	const output = await format(TEST_MARKDOWN, options);
 
 	expect(output).toMatchSnapshot();
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('supports `htmlFragmentBracketSameLine`', async () => {
-	const input = `<div first="one" second="two" third="three">value</div>
+	const input = `<div id="foo" class="bar" title="baz">qux</div>
 
 \`\`\`html
-<section first="one" second="two" third="three">value</section>
+<section id="foo" class="bar" title="baz">qux</section>
 \`\`\`
 `;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		printWidth: 20,
+		singleAttributePerLine: true,
+	};
+	const bracketSameLineOptions = {
+		...options,
+		bracketSameLine: true,
+		htmlFragmentBracketSameLine: false,
+	};
+	const htmlFragmentBracketSameLineOptions = {
+		...options,
+		bracketSameLine: false,
+		htmlFragmentBracketSameLine: true,
+	};
 
-	const outputs: string[] = [];
-
-	for (const htmlFragmentBracketSameLine of [false, true]) {
-		outputs.push(
-			await format(input, {
-				bracketSameLine: !htmlFragmentBracketSameLine,
-				htmlFragmentBracketSameLine,
-				parser: 'markdown',
-				plugins: [pluginMarkdownHTML],
-				printWidth: 20,
-				singleAttributePerLine: true,
-			})
-		);
-	}
+	const outputs = {
+		false: await format(input, bracketSameLineOptions),
+		true: await format(input, htmlFragmentBracketSameLineOptions),
+	};
 
 	expect(outputs).toMatchInlineSnapshot(`
-		[
-		  "<div
-		  first="one"
-		  second="two"
-		  third="three"
+		{
+		  "false": "<div
+		  id="foo"
+		  class="bar"
+		  title="baz"
 		>
-		  value
+		  qux
 		</div>
 
 		\`\`\`html
 		<section
-		  first="one"
-		  second="two"
-		  third="three">
-		  value
+		  id="foo"
+		  class="bar"
+		  title="baz">
+		  qux
 		</section>
 		\`\`\`
 		",
-		  "<div
-		  first="one"
-		  second="two"
-		  third="three">
-		  value
+		  "true": "<div
+		  id="foo"
+		  class="bar"
+		  title="baz">
+		  qux
 		</div>
 
 		\`\`\`html
 		<section
-		  first="one"
-		  second="two"
-		  third="three"
+		  id="foo"
+		  class="bar"
+		  title="baz"
 		>
-		  value
+		  qux
 		</section>
 		\`\`\`
 		",
-		]
+		}
 	`);
+	await expect(format(outputs.false, bracketSameLineOptions)).resolves.toBe(
+		outputs.false
+	);
+	await expect(
+		format(outputs.true, htmlFragmentBracketSameLineOptions)
+	).resolves.toBe(outputs.true);
 });
 
 test('supports `htmlFragmentEmbeddedLanguageFormatting`', async () => {
-	const input = `<script>const value={foo:1,bar:2}</script>
+	const input = `<script>const foo={bar:1,baz:2}</script>
 
 \`\`\`js
-const value={foo:1,bar:2}
+const foo={bar:1,baz:2}
 \`\`\`
 `;
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+	const autoOptions = {
+		...options,
+		embeddedLanguageFormatting: 'off' as const,
+		htmlFragmentEmbeddedLanguageFormatting: 'auto' as const,
+	};
+	const offOptions = {
+		...options,
+		embeddedLanguageFormatting: 'auto' as const,
+		htmlFragmentEmbeddedLanguageFormatting: 'off' as const,
+	};
 
-	const outputs: string[] = [];
-
-	for (const htmlFragmentEmbeddedLanguageFormatting of [
-		'auto',
-		'off',
-	] as const) {
-		outputs.push(
-			await format(input, {
-				embeddedLanguageFormatting:
-					htmlFragmentEmbeddedLanguageFormatting === 'auto'
-						? 'off'
-						: 'auto',
-				htmlFragmentEmbeddedLanguageFormatting,
-				parser: 'markdown',
-				plugins: [pluginMarkdownHTML],
-			})
-		);
-	}
+	const outputs = {
+		auto: await format(input, autoOptions),
+		off: await format(input, offOptions),
+	};
 
 	expect(outputs).toMatchInlineSnapshot(`
-		[
-		  "<script>
-		  const value = { foo: 1, bar: 2 };
+		{
+		  "auto": "<script>
+		  const foo = { bar: 1, baz: 2 };
 		</script>
 
 		\`\`\`js
-		const value={foo:1,bar:2}
+		const foo={bar:1,baz:2}
 		\`\`\`
 		",
-		  "<script>
-		  const value={foo:1,bar:2}
+		  "off": "<script>
+		  const foo={bar:1,baz:2}
 		</script>
 
 		\`\`\`js
-		const value = { foo: 1, bar: 2 };
+		const foo = { bar: 1, baz: 2 };
 		\`\`\`
 		",
-		]
+		}
 	`);
+	await expect(format(outputs.auto, autoOptions)).resolves.toBe(outputs.auto);
+	await expect(format(outputs.off, offOptions)).resolves.toBe(outputs.off);
 });
 
 test('supports `htmlFragmentPrintWidth`', async () => {
-	const output = await format(TEST_MARKDOWN, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
 		htmlFragmentPrintWidth: 80,
 		printWidth: 40,
-	});
+	};
+
+	const output = await format(TEST_MARKDOWN, options);
 
 	expect(output).toMatchSnapshot();
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('supports `htmlFragmentSingleAttributePerLine`', async () => {
-	for (const [htmlFragmentSingleAttributePerLine, singleAttributePerLine] of [
-		[true, false],
-		[false, true],
-	] as const) {
-		const output = await format(TEST_MARKDOWN, {
-			parser: 'markdown',
-			plugins: [pluginMarkdownHTML],
-			htmlFragmentSingleAttributePerLine,
-			singleAttributePerLine,
-		});
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+	};
+	const htmlFragmentSingleAttributePerLineOptions = {
+		...options,
+		htmlFragmentSingleAttributePerLine: true,
+		singleAttributePerLine: false,
+	};
+	const singleAttributePerLineOptions = {
+		...options,
+		htmlFragmentSingleAttributePerLine: false,
+		singleAttributePerLine: true,
+	};
 
-		expect(output).toMatchSnapshot();
-	}
+	const outputs = {
+		false: await format(TEST_MARKDOWN, singleAttributePerLineOptions),
+		true: await format(
+			TEST_MARKDOWN,
+			htmlFragmentSingleAttributePerLineOptions
+		),
+	};
+
+	expect(outputs).toMatchSnapshot();
+	await expect(
+		format(outputs.false, singleAttributePerLineOptions)
+	).resolves.toBe(outputs.false);
+	await expect(
+		format(outputs.true, htmlFragmentSingleAttributePerLineOptions)
+	).resolves.toBe(outputs.true);
 });
 
 test('supports `htmlFragmentWhitespaceSensitivity`', async () => {
-	const output = await format(TEST_MARKDOWN, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
-		htmlFragmentWhitespaceSensitivity: 'css',
-		htmlWhitespaceSensitivity: 'strict',
-	});
+		htmlFragmentWhitespaceSensitivity: 'css' as const,
+		htmlWhitespaceSensitivity: 'strict' as const,
+	};
+
+	const output = await format(TEST_MARKDOWN, options);
 
 	expect(output).toMatchSnapshot();
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('handles empty files', async () => {
 	const input = '\n';
-
-	const output = await format(input, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
-	});
+	};
+
+	const output = await format(input, options);
 
 	expect(output).toBe('');
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('reports formatting errors', async () => {
@@ -1349,33 +1528,41 @@ test('reports formatting errors', async () => {
 		(error: unknown) => error
 	)) as Error;
 
-	const [errorMessageWithSource] = errorWithSource.message.split('\n');
-	const [errorMessageWithoutSource] = errorWithoutSource.message.split('\n');
-
 	expect(errorWithSource).toBeInstanceOf(Error);
 	expect(errorWithSource.cause).toBeInstanceOf(Error);
-	expect(errorMessageWithSource).toMatchInlineSnapshot(
+	expect(errorWithSource.message.split('\n')[0]).toMatchInlineSnapshot(
 		`"[prettier-plugin-markdown-html] Failed to format HTML fragment in \`foo/bar.md\`:"`
 	);
 
 	expect(errorWithoutSource).toBeInstanceOf(Error);
 	expect(errorWithoutSource.cause).toBeInstanceOf(Error);
-	expect(errorMessageWithoutSource).toMatchInlineSnapshot(
+	expect(errorWithoutSource.message.split('\n')[0]).toMatchInlineSnapshot(
 		`"[prettier-plugin-markdown-html] Failed to format HTML fragment:"`
 	);
 });
 
 test('formats in standalone mode', async () => {
-	const output = await standaloneFormat(
-		'<div id = "foo" class = "bar">value</div>\n',
-		{
-			parser: 'markdown',
-			plugins: [pluginMarkdownHTML],
-		}
-	);
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginHTML, pluginMarkdownHTML],
+	};
 
-	expect(output).toMatchInlineSnapshot(`
-		"<div id="foo" class="bar">value</div>
-		"
-	`);
+	const expectedOutput = await format(TEST_MARKDOWN, options);
+	const output = await standaloneFormat(TEST_MARKDOWN, options);
+
+	expect(output).toBe(expectedOutput);
+});
+
+test('formats in standalone mode when `singleAttributePerLine` is `true`', async () => {
+	const input = '<div id = "foo" class = "bar">baz</div>\n';
+	const options = {
+		parser: 'markdown' as const,
+		plugins: [pluginMarkdownHTML],
+		singleAttributePerLine: true,
+	};
+
+	const expectedOutput = await format(input, options);
+	const output = await standaloneFormat(input, options);
+
+	expect(output).toBe(expectedOutput);
 });

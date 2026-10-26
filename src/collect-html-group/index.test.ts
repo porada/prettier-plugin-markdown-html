@@ -65,67 +65,76 @@ test('separates closed HTML groups using source offsets', () => {
 	});
 });
 
-test('preserves significant blank lines without Markdown container prefixes', () => {
-	const cases = [
-		['', '', '', ''],
-		['  ', '', '  ', ''],
-		['  ', '    ', '  ', '  '],
-		['> ', '>', '> ', ''],
-		['>   ', '>', '>   ', ''],
-		['> > ', '> >', '>>', ''],
-	] as const;
+test.each([
+	['', '', '', '', '\n'],
+	['', '', '', '', '\r'],
+	['', '', '', '', '\r\n'],
+	['  ', '', '  ', '', '\n'],
+	['  ', '', '  ', '', '\r'],
+	['  ', '', '  ', '', '\r\n'],
+	['  ', '    ', '  ', '  ', '\n'],
+	['  ', '    ', '  ', '  ', '\r'],
+	['  ', '    ', '  ', '  ', '\r\n'],
+	['> ', '>', '> ', '', '\n'],
+	['> ', '>', '> ', '', '\r'],
+	['> ', '>', '> ', '', '\r\n'],
+	['>   ', '>', '>   ', '', '\n'],
+	['>   ', '>', '>   ', '', '\r'],
+	['>   ', '>', '>   ', '', '\r\n'],
+	['> > ', '> >', '>>', '', '\n'],
+	['> > ', '> >', '>>', '', '\r'],
+	['> > ', '> >', '>>', '', '\r\n'],
+] as const)(
+	'preserves significant blank lines without Markdown container prefixes',
+	(prefix, blankPrefix, closingPrefix, whitespace, separator) => {
+		const opening = '<div title="';
+		const closing = '<p>foo</p>"></div>';
+		const input = `${prefix}${opening}${separator}${blankPrefix}${separator}${closingPrefix}${closing}`;
+		const closingOffset = input.length - closing.length;
 
-	for (const [prefix, blankPrefix, closingPrefix, whitespace] of cases) {
-		for (const separator of ['\n', '\r', '\r\n']) {
-			const opening = '<div title="';
-			const closing = '<p>foo</p>"></div>';
-			const input = `${prefix}${opening}${separator}${blankPrefix}${separator}${closingPrefix}${closing}`;
-			const closingOffset = input.length - closing.length;
-
-			const children: AST.HTMLNode[] = [
-				{
-					type: 'html',
-					value: opening,
-					position: {
-						start: {
-							line: 1,
-							column: prefix.length + 1,
-							offset: prefix.length,
-						},
-						end: {
-							line: 1,
-							column: prefix.length + opening.length + 1,
-							offset: prefix.length + opening.length,
-						},
+		const children: AST.HTMLNode[] = [
+			{
+				type: 'html',
+				value: opening,
+				position: {
+					start: {
+						line: 1,
+						column: prefix.length + 1,
+						offset: prefix.length,
+					},
+					end: {
+						line: 1,
+						column: prefix.length + opening.length + 1,
+						offset: prefix.length + opening.length,
 					},
 				},
-				{
-					type: 'html',
-					value: closing,
-					position: {
-						start: {
-							line: 3,
-							column: closingPrefix.length + 1,
-							offset: closingOffset,
-						},
-						end: {
-							line: 3,
-							column: closingPrefix.length + closing.length + 1,
-							offset: input.length,
-						},
+			},
+			{
+				type: 'html',
+				value: closing,
+				position: {
+					start: {
+						line: 3,
+						column: closingPrefix.length + 1,
+						offset: closingOffset,
+					},
+					end: {
+						line: 3,
+						column: closingPrefix.length + closing.length + 1,
+						offset: input.length,
 					},
 				},
-			];
+			},
+		];
 
-			const group = collectHTMLGroup(children, 0, input);
+		const group = collectHTMLGroup(children, 0, input);
 
-			expect(group).toStrictEqual({
-				value: `${opening}\n${whitespace}\n${closing}`,
-				children,
-			});
-		}
+		expect(group).toStrictEqual({
+			value: `${opening}\n${whitespace}\n${closing}`,
+			children,
+		});
 	}
-});
+);
 
 test('preserves separators on the same source line', () => {
 	const children: AST.HTMLNode[] = [
@@ -154,26 +163,27 @@ test('preserves separators on the same source line', () => {
 	});
 });
 
-test('uses line positions when source offsets are absent or overlap', () => {
-	for (const offsets of [
-		[undefined, undefined],
-		[undefined, 0],
-		[5, 4],
-	]) {
+test.each([
+	[undefined, undefined],
+	[undefined, 0],
+	[5, 4],
+])(
+	'uses line positions when source offsets are absent or overlap',
+	(endOffset, startOffset) => {
 		const children: AST.HTMLNode[] = [
 			{
 				type: 'html',
 				value: '<div>',
 				position: {
 					start: { line: 1, column: 1 },
-					end: { line: 1, column: 6, offset: offsets[0] },
+					end: { line: 1, column: 6, offset: endOffset },
 				},
 			},
 			{
 				type: 'html',
 				value: '</div>',
 				position: {
-					start: { line: 3, column: 1, offset: offsets[1] },
+					start: { line: 3, column: 1, offset: startOffset },
 					end: { line: 3, column: 7 },
 				},
 			},
@@ -184,7 +194,7 @@ test('uses line positions when source offsets are absent or overlap', () => {
 			children,
 		});
 	}
-});
+);
 
 test('handles source positions on only one node', () => {
 	const opening: AST.HTMLNode = {
@@ -215,8 +225,9 @@ test('handles source positions on only one node', () => {
 	}
 });
 
-test('continues an inherited raw-text group until its closing tag', () => {
-	for (const tagName of ['script', 'style', 'textarea', 'title']) {
+test.each(['script', 'style', 'textarea', 'title'])(
+	'continues an inherited `%s` raw text group until its closing tag',
+	(tagName) => {
 		const closing = `</${tagName}>`;
 		const children: AST.HTMLNode[] = [
 			{
@@ -250,4 +261,4 @@ test('continues an inherited raw-text group until its closing tag', () => {
 			children: children.slice(0, 2),
 		});
 	}
-});
+);

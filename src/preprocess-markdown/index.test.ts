@@ -18,13 +18,16 @@ beforeEach(() => {
 test('processes root nodes only', async () => {
 	const node: AST.Node = { type: 'html', value: '<p>foo</p>' };
 
-	const result = await preprocessMarkdown(node, {} as ParserOptions);
+	const result = await preprocessMarkdown(
+		node,
+		{} as unknown as ParserOptions
+	);
 
 	expect(result).toBe(node);
 	expect(formatHTML).not.toHaveBeenCalled();
 });
 
-test('formats HTML in group of nodes', async () => {
+test('formats HTML in a group of nodes', async () => {
 	const root: AST.RootNode = {
 		type: 'root',
 		children: [
@@ -36,7 +39,7 @@ test('formats HTML in group of nodes', async () => {
 
 	vi.mocked(formatHTML).mockResolvedValueOnce('<div><p>foo</p></div>');
 
-	await preprocessMarkdown(root, {} as ParserOptions);
+	await preprocessMarkdown(root, {} as unknown as ParserOptions);
 
 	expect(formatHTML).toHaveBeenCalledWith('<div>\n<p>foo</p></div>', {});
 	expect(root.children).toStrictEqual([
@@ -80,7 +83,7 @@ test('formats HTML nested in block and phrasing parents', async () => {
 		)
 		.mockResolvedValueOnce('<span id="foo" class="bar"></span>');
 
-	await preprocessMarkdown(root, {} as ParserOptions);
+	await preprocessMarkdown(root, {} as unknown as ParserOptions);
 
 	expect(formatHTML).toHaveBeenNthCalledWith(
 		1,
@@ -127,7 +130,7 @@ test('keeps closing tags without formatting', async () => {
 		],
 	};
 
-	await preprocessMarkdown(root, {} as ParserOptions);
+	await preprocessMarkdown(root, {} as unknown as ParserOptions);
 
 	expect(formatHTML).not.toHaveBeenCalled();
 	expect(root.children).toStrictEqual([
@@ -136,7 +139,7 @@ test('keeps closing tags without formatting', async () => {
 	]);
 });
 
-test('keeps an incomplete inline raw-text tag unchanged', async () => {
+test('keeps an incomplete inline raw text tag unchanged', async () => {
 	const root: AST.RootNode = {
 		type: 'root',
 		children: [
@@ -150,7 +153,7 @@ test('keeps an incomplete inline raw-text tag unchanged', async () => {
 		],
 	};
 
-	await preprocessMarkdown(root, {} as ParserOptions);
+	await preprocessMarkdown(root, {} as unknown as ParserOptions);
 
 	expect(root.children[0]!.children).toStrictEqual([
 		{ type: 'html', value: '<title>' },
@@ -174,7 +177,7 @@ test('handles inline block HTML without source positions', async () => {
 
 	await preprocessMarkdown(root, {
 		proseWrap: 'always',
-	} as ParserOptions);
+	} as unknown as ParserOptions);
 
 	expect(root.children[0]!.children).toStrictEqual([
 		{ type: 'text', value: 'Before ' },
@@ -182,23 +185,23 @@ test('handles inline block HTML without source positions', async () => {
 	]);
 });
 
-test('keeps inline separators that aren’t horizontal whitespace', async () => {
-	const separators: AST.Node[] = [
-		{
-			type: 'text',
-			value: 'Before ',
-		},
-		{
-			type: 'strong',
-			children: [{ type: 'whitespace' }],
-		},
-	];
-
-	for (const separator of separators) {
+test.each<AST.Node>([
+	{
+		type: 'text',
+		value: 'Before ',
+	},
+	{
+		type: 'strong',
+		children: [{ type: 'whitespace' }],
+	},
+])(
+	'keeps inline `$type` separators that aren’t horizontal whitespace',
+	async (separator) => {
 		separator.position = {
 			start: { line: 1, column: 1, offset: 0 },
 			end: { line: 1, column: 8, offset: 7 },
 		};
+		const expectedResult = structuredClone(separator);
 
 		const root: AST.RootNode = {
 			type: 'root',
@@ -222,11 +225,12 @@ test('keeps inline separators that aren’t horizontal whitespace', async () => 
 
 		await preprocessMarkdown(root, {
 			proseWrap: 'always',
-		} as ParserOptions);
+		} as unknown as ParserOptions);
 
 		expect(root.children[0]!.children![0]).toBe(separator);
+		expect(root.children[0]!.children![0]).toStrictEqual(expectedResult);
 	}
-});
+);
 
 test('handles inline HTML without a tag name when wrapping prose', async () => {
 	const root: AST.RootNode = {
@@ -241,7 +245,7 @@ test('handles inline HTML without a tag name when wrapping prose', async () => {
 
 	await preprocessMarkdown(root, {
 		proseWrap: 'always',
-	} as ParserOptions);
+	} as unknown as ParserOptions);
 
 	expect(root.children[0]!.children).toStrictEqual([
 		{ type: 'html', value: '<!-- foo -->' },
@@ -273,7 +277,7 @@ test('preserves blank lines detected from source offsets', async () => {
 
 	await preprocessMarkdown(root, {
 		originalText: '<div></div>\n\n<p></p>',
-	} as ParserOptions);
+	} as unknown as ParserOptions);
 
 	expect(formatHTML).toHaveBeenNthCalledWith(1, '<div></div>', {
 		originalText: '<div></div>\n\n<p></p>',
@@ -293,8 +297,9 @@ test('keeps original nodes when trailing closing tags can’t be stripped', asyn
 
 	vi.mocked(formatHTML).mockResolvedValueOnce('<div><p>foo</p>');
 
-	await preprocessMarkdown(root, {} as ParserOptions);
+	await preprocessMarkdown(root, {} as unknown as ParserOptions);
 
-	expect(root.children).toStrictEqual([node]);
+	expect(root.children).toHaveLength(1);
+	expect(root.children[0]).toBe(node);
 	expect(root.children[0]!.value).toBe('<div><p>foo</p>');
 });

@@ -46,7 +46,7 @@ function createPriorParser(
 		...markdownParsers[parserName],
 		preprocess: async () => {
 			await Promise.resolve();
-			return 'Parser <span id = "foo">value</span>\n';
+			return 'Parser <span id = "foo">baz</span>\n';
 		},
 	};
 }
@@ -105,121 +105,293 @@ function createPriorPlugin(
 	};
 }
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'runs lazy copied `%s` hooks once in every plugin order',
-	async (parserName) => {
-		for (const placement of ['after', 'alone', 'before'] as const) {
-			const parser = getDirectParser(pluginMarkdownHTML, parserName);
-			const parse = vi.fn(function (
-				this: Parser,
-				text: string,
-				options: ParserOptions
-			) {
-				return parser.parse.call(this, text, options);
-			});
-			const preprocess = vi.fn(function (
-				this: Parser,
-				text: string,
-				options: ParserOptions
-			): Promise<string> | string {
-				return parser.preprocess!.call(
-					this,
-					text.replace('value', 'bar value'),
-					options
-				);
+async function formatWithIncompatiblePriorParser(
+	parserName: (typeof MARKDOWN_PARSER_NAMES)[number]
+): Promise<string> {
+	const priorPlugin: Plugin = {
+		parsers: {
+			[parserName]: {
+				...markdownParsers[parserName],
+				astFormat: 'incompatible-mdast',
+			},
+		},
+	};
+
+	return format('foo\n', {
+		parser: parserName,
+		plugins: [priorPlugin, pluginMarkdownHTML],
+	});
+}
+
+async function formatWithIncompatibleWrapper(
+	parserName: (typeof MARKDOWN_PARSER_NAMES)[number]
+): Promise<string> {
+	const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
+
+	const wrapperPlugin: Plugin = {
+		parsers: {
+			[parserName]: {
+				...currentParser,
+				astFormat: 'incompatible-mdast',
+				preprocess: undefined,
+			},
+		},
+	};
+
+	return format('foo\n', {
+		parser: parserName,
+		plugins: [wrapperPlugin, pluginMarkdownHTML],
+	});
+}
+
+async function createEntryOptionsFixture(
+	hook: 'parse' | 'preprocess',
+	parserName: (typeof MARKDOWN_PARSER_NAMES)[number]
+) {
+	const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
+
+	const locEnd: Parser['locEnd'] = (node) => currentParser.locEnd(node);
+	const locStart: Parser['locStart'] = (node) => currentParser.locStart(node);
+
+	const priorParser: Parser = {
+		...createPriorParser(parserName),
+		locEnd: (node) => currentParser.locEnd(node),
+		locStart: (node) => currentParser.locStart(node),
+	};
+
+	const priorPlugin: Plugin = {
+		parsers: {
+			[parserName]: priorParser,
+		},
+	};
+	const removedPlugin: Plugin = {};
+	const wrapperPlugin: Plugin = {
+		parsers: {
+			[parserName]: {
+				...currentParser,
+				parse: vi.fn(currentParser.parse),
+				preprocess: vi.fn(currentParser.preprocess),
+			},
+		},
+	};
+
+	const options = {
+		astFormat: currentParser.astFormat,
+		locEnd: currentParser.locEnd,
+		locStart: currentParser.locStart,
+		parser: parserName,
+		plugins: [
+			removedPlugin,
+			priorPlugin,
+			wrapperPlugin,
+			pluginMarkdownHTML,
+		],
+	} as unknown as ParserOptions;
+
+	const originalOptions = { ...options };
+	const resolvePriorParser = createPriorParserResolver(
+		parserName,
+		currentParser.astFormat,
+		currentParser
+	);
+	const resolved = await resolvePriorParser(options, hook);
+
+	if (!resolved?.delegation) {
+		throw new Error();
+	}
+
+	const next = await resolved.delegation.resolveNext();
+
+	if (!next) {
+		throw new Error();
+	}
+
+	await withPriorParserOptions(options, resolved, async (delegatedOptions) =>
+		withPriorParserOptions(delegatedOptions, next, async () => {
+			await Promise.resolve();
+		})
+	);
+
+	expect(options.locEnd).toBe(
+		hook === 'parse' ? priorParser.locEnd : currentParser.locEnd
+	);
+	expect(options.locStart).toBe(
+		hook === 'parse' ? priorParser.locStart : currentParser.locStart
+	);
+	await expect(resolvePriorParser(options, hook)).resolves.toBe(resolved);
+	expect(resolved.lifecycleState).toStrictEqual({});
+
+	const reassignedPlugins = [priorPlugin];
+
+	return {
+		locEnd,
+		locStart,
+		options,
+		reassign: async (delegatedOptions: ParserOptions): Promise<void> => {
+			delegatedOptions.locEnd = locEnd;
+			delegatedOptions.locStart = locStart;
+			delegatedOptions.plugins = reassignedPlugins;
+
+			await Promise.resolve();
+		},
+		reassignedPlugins,
+		resolved,
+		verifyRestoration: async (): Promise<void> => {
+			Object.assign(options, originalOptions);
+
+			const callback = vi.fn(async (delegatedOptions: ParserOptions) => {
+				await Promise.resolve();
+				expect(delegatedOptions.locEnd).toBe(currentParser.locEnd);
+				expect(delegatedOptions.locStart).toBe(currentParser.locStart);
+				expect(delegatedOptions.plugins).toContain(removedPlugin);
 			});
 
-			const wrapperPlugin = {
-				parsers: {
-					[parserName]: async () => {
-						await Promise.resolve();
-						return { ...parser, parse, preprocess };
-					},
+			await expect(resolvePriorParser(options, hook)).resolves.toBe(
+				resolved
+			);
+			await withPriorParserOptions(options, resolved, callback);
+
+			expect(callback).toHaveBeenCalledTimes(1);
+			expect(options).toStrictEqual(originalOptions);
+		},
+	};
+}
+
+test.each([
+	['after this plugin', 'markdown'],
+	['after this plugin', 'remark'],
+	['alone', 'markdown'],
+	['alone', 'remark'],
+	['before this plugin', 'markdown'],
+	['before this plugin', 'remark'],
+] as const)(
+	'runs lazy copied hooks once when placed %s with the `%s` parser',
+	async (placement, parserName) => {
+		const parser = getDirectParser(pluginMarkdownHTML, parserName);
+		const parse = vi.fn(function (
+			this: Parser,
+			text: string,
+			options: ParserOptions
+		) {
+			return parser.parse.call(this, text, options);
+		});
+		const preprocess = vi.fn(function (
+			this: Parser,
+			text: string,
+			options: ParserOptions
+		): Promise<string> | string {
+			return parser.preprocess!.call(
+				this,
+				text.replace('bar', 'baz bar'),
+				options
+			);
+		});
+
+		const wrapperPlugin = {
+			parsers: {
+				[parserName]: async () => {
+					await Promise.resolve();
+					return { ...parser, parse, preprocess };
 				},
-				printers: pluginMarkdownHTML.printers,
-			} as unknown as Plugin;
+			},
+			printers: pluginMarkdownHTML.printers,
+		} as unknown as Plugin;
 
-			const input = '<span id = "foo">value</span>\n';
-			const expectedOutput = '<span id="foo">bar value</span>\n';
+		const input = '<span id = "foo">bar</span>\n';
+		const expectedOutput = '<span id="foo">baz bar</span>\n';
 
-			const plugins = {
-				after: [pluginMarkdownHTML, wrapperPlugin],
-				alone: [wrapperPlugin],
-				before: [wrapperPlugin, pluginMarkdownHTML],
-			}[placement];
+		const plugins = {
+			'after this plugin': [pluginMarkdownHTML, wrapperPlugin],
+			'alone': [wrapperPlugin],
+			'before this plugin': [wrapperPlugin, pluginMarkdownHTML],
+		}[placement];
 
-			const output = await format(input, {
-				parser: parserName,
-				plugins,
-			});
+		const output = await format(input, {
+			parser: parserName,
+			plugins,
+		});
 
-			expect(parse).toHaveBeenCalledTimes(1);
-			expect(preprocess).toHaveBeenCalledTimes(1);
-			expect(output).toBe(expectedOutput);
-		}
+		expect(parse).toHaveBeenCalledTimes(1);
+		expect(preprocess).toHaveBeenCalledTimes(1);
+		expect(output).toBe(expectedOutput);
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'runs copied `%s` hooks after plugin list replacement with this plugin last',
-	async (parserName) => {
-		for (const hook of ['parse', 'preprocess'] as const) {
-			for (const preserveReceiver of [false, true]) {
-				const parser = getDirectParser(pluginMarkdownHTML, parserName);
-				const priorHook = vi.fn(
-					(text: string, options: ParserOptions) =>
-						parser[hook]!(text, options)
-				);
+test.each([
+	['a copied `parse` hook', 'markdown', 'parse', true],
+	['a copied `parse` hook', 'remark', 'parse', true],
+	[
+		'a copied `preprocess` hook through a wrapper that calls this plugin’s parser',
+		'markdown',
+		'preprocess',
+		false,
+	],
+	[
+		'a copied `preprocess` hook through a wrapper that calls this plugin’s parser',
+		'remark',
+		'preprocess',
+		false,
+	],
+	[
+		'a copied `preprocess` hook through a wrapper that forwards its receiver',
+		'markdown',
+		'preprocess',
+		true,
+	],
+	[
+		'a copied `preprocess` hook through a wrapper that forwards its receiver',
+		'remark',
+		'preprocess',
+		true,
+	],
+] as const)(
+	'runs %s after plugin list replacement with the `%s` parser',
+	async (_, parserName, hook, preserveReceiver) => {
+		const parser = getDirectParser(pluginMarkdownHTML, parserName);
+		const priorHook = vi.fn((text: string, options: ParserOptions) =>
+			parser[hook]!(text, options)
+		);
 
-				const innerPlugin: Plugin = {
-					parsers: {
-						[parserName]: {
-							...parser,
-							[hook]: priorHook,
-						},
+		const innerPlugin: Plugin = {
+			parsers: {
+				[parserName]: {
+					...parser,
+					[hook]: priorHook,
+				},
+			},
+			printers: pluginMarkdownHTML.printers,
+		};
+
+		const outerPlugin: Plugin = {
+			parsers: {
+				[parserName]: {
+					...parser,
+					preprocess(text, options): Promise<string> | string {
+						options.plugins = [innerPlugin];
+
+						if (hook === 'parse') {
+							return text;
+						}
+
+						return preserveReceiver
+							? parser.preprocess!.call(this, text, options)
+							: parser.preprocess!(text, options);
 					},
-					printers: pluginMarkdownHTML.printers,
-				};
+				},
+			},
+			printers: pluginMarkdownHTML.printers,
+		};
 
-				const outerPlugin: Plugin = {
-					parsers: {
-						[parserName]: {
-							...parser,
-							preprocess(
-								text,
-								options
-							): Promise<string> | string {
-								options.plugins = [innerPlugin];
+		const input = '<span id = "foo">bar</span>\n';
+		const expectedOutput = '<span id="foo">bar</span>\n';
 
-								if (hook === 'parse') {
-									return text;
-								}
+		const output = await format(input, {
+			parser: parserName,
+			plugins: [innerPlugin, outerPlugin, pluginMarkdownHTML],
+		});
 
-								return preserveReceiver
-									? parser.preprocess!.call(
-											this,
-											text,
-											options
-										)
-									: parser.preprocess!(text, options);
-							},
-						},
-					},
-					printers: pluginMarkdownHTML.printers,
-				};
-
-				const input = '<span id = "foo">value</span>\n';
-				const expectedOutput = '<span id="foo">value</span>\n';
-
-				const output = await format(input, {
-					parser: parserName,
-					plugins: [innerPlugin, outerPlugin, pluginMarkdownHTML],
-				});
-
-				expect(priorHook).toHaveBeenCalledTimes(1);
-				expect(output).toBe(expectedOutput);
-			}
-		}
+		expect(priorHook).toHaveBeenCalledTimes(1);
+		expect(output).toBe(expectedOutput);
 	}
 );
 
@@ -315,15 +487,14 @@ test('preserves the selected parser name between hooks', async () => {
 		plugins: [priorPlugin, pluginMarkdownHTML],
 	} as unknown as ParserOptions;
 
-	await expect(
-		resolvePriorParser(options, 'preprocess')
-	).resolves.toMatchObject({ parser: priorParser });
+	let result = await resolvePriorParser(options, 'preprocess');
+
+	expect(result?.parser).toBe(priorParser);
 
 	options.parser = 'remark';
+	result = await resolvePriorParser(options, 'parse');
 
-	await expect(resolvePriorParser(options, 'parse')).resolves.toMatchObject({
-		parser: priorParser,
-	});
+	expect(result?.parser).toBe(priorParser);
 });
 
 test('resolves printer-only plugins without a matching parser', async () => {
@@ -354,7 +525,7 @@ test('resolves printer-only plugins without a matching parser', async () => {
 
 	const resolvedPrinter = await resolvePriorPrinter({
 		plugins,
-	} as ParserOptions);
+	} as unknown as ParserOptions);
 
 	expect(resolvedPrinter?.printer).toBe(fallbackPrinter);
 	expect(resolvedPrinter?.plugins).toBe(plugins);
@@ -381,7 +552,7 @@ test('resolves preprocessing extensions that reuse the current print hook', asyn
 	);
 	const result = await resolvePriorPrinter({
 		plugins: [plugin],
-	} as ParserOptions);
+	} as unknown as ParserOptions);
 
 	expect(result?.printer).toBe(priorPrinter);
 });
@@ -406,7 +577,7 @@ test('rejects native printing when the current printer has an unrelated print ho
 	);
 
 	await expect(
-		resolvePriorPrinter({ plugins: [plugin] } as ParserOptions)
+		resolvePriorPrinter({ plugins: [plugin] } as unknown as ParserOptions)
 	).resolves.toBeUndefined();
 });
 
@@ -440,7 +611,7 @@ test('returns `undefined` for printers without `preprocess`', async () => {
 		}
 	);
 
-	const options = { plugins } as ParserOptions;
+	const options = { plugins } as unknown as ParserOptions;
 
 	await expect(resolveAssociatedPrinter(options)).resolves.toBeUndefined();
 
@@ -499,7 +670,7 @@ test('reuses resolved lazy printers while falling back', async () => {
 
 	const resolvedPrinter = await resolvePriorPrinter({
 		plugins,
-	} as ParserOptions);
+	} as unknown as ParserOptions);
 
 	expect(resolvedPrinter?.printer).toBe(fallbackPrinter);
 	expect(resolvedPrinter?.plugins).toStrictEqual([fallbackPlugin]);
@@ -535,6 +706,12 @@ test('sets and restores prior parser location functions', async () => {
 
 	const originalPlugins = options.plugins;
 
+	const callback = vi.fn(async (delegatedOptions: ParserOptions) => {
+		await Promise.resolve();
+		expect(delegatedOptions.locEnd).toBe(locEnd);
+		expect(delegatedOptions.locStart).toBe(locStart);
+	});
+
 	await withPriorParserOptions(
 		options,
 		{
@@ -543,62 +720,85 @@ test('sets and restores prior parser location functions', async () => {
 			plugin: priorPlugin,
 			plugins,
 		},
-		async (delegatedOptions) => {
-			await Promise.resolve();
-			expect(delegatedOptions.locEnd).toBe(locEnd);
-			expect(delegatedOptions.locStart).toBe(locStart);
-		}
+		callback
 	);
 
+	expect(callback).toHaveBeenCalledTimes(1);
 	expect(options.locEnd).toBe(currentParser.locEnd);
 	expect(options.locStart).toBe(currentParser.locStart);
 	expect(options.plugins).toBe(originalPlugins);
 });
 
-test.each(['rejected', 'resolved'] as const)(
-	'preserves location functions around %s printer preprocessing',
-	async (outcome) => {
-		const currentParser = getDirectParser(pluginMarkdownHTML, 'markdown');
+test('preserves location functions around rejected printer preprocessing', async () => {
+	const currentParser = getDirectParser(pluginMarkdownHTML, 'markdown');
 
-		const options = {
-			locEnd: currentParser.locEnd,
-			locStart: currentParser.locStart,
-			plugins: [pluginMarkdownHTML],
-		} as unknown as ParserOptions;
+	const options = {
+		locEnd: currentParser.locEnd,
+		locStart: currentParser.locStart,
+		plugins: [pluginMarkdownHTML],
+	} as unknown as ParserOptions;
 
-		const originalOptions = { ...options };
-		const error = new Error();
-		const result = withPriorPrinterOptions(
+	const originalOptions = { ...options };
+	const error = new Error();
+	const callback = vi.fn(async (delegatedOptions: ParserOptions) => {
+		await Promise.resolve();
+		expect(delegatedOptions.locEnd).toBe(currentParser.locEnd);
+		expect(delegatedOptions.locStart).toBe(currentParser.locStart);
+
+		delegatedOptions.locEnd = (node) => currentParser.locEnd(node);
+		delegatedOptions.locStart = (node) => currentParser.locStart(node);
+
+		throw error;
+	});
+
+	await expect(
+		withPriorPrinterOptions(
 			options,
 			{
 				plugins: [],
 				printer: markdownPrinters.mdast,
 			},
-			async (delegatedOptions) => {
-				await Promise.resolve();
-				expect(delegatedOptions.locEnd).toBe(currentParser.locEnd);
-				expect(delegatedOptions.locStart).toBe(currentParser.locStart);
+			callback
+		)
+	).rejects.toBe(error);
 
-				delegatedOptions.locEnd = (node) => currentParser.locEnd(node);
-				delegatedOptions.locStart = (node) =>
-					currentParser.locStart(node);
+	expect(callback).toHaveBeenCalledTimes(1);
+	expect(options).toStrictEqual(originalOptions);
+});
 
-				if (outcome === 'rejected') {
-					throw error;
-				}
-			}
-		);
+test('preserves location functions around resolved printer preprocessing', async () => {
+	const currentParser = getDirectParser(pluginMarkdownHTML, 'markdown');
 
-		await expect(
-			result.then(
-				() => undefined,
-				(caughtError: unknown) => caughtError
-			)
-		).resolves.toBe(outcome === 'rejected' ? error : undefined);
+	const options = {
+		locEnd: currentParser.locEnd,
+		locStart: currentParser.locStart,
+		plugins: [pluginMarkdownHTML],
+	} as unknown as ParserOptions;
 
-		expect(options).toStrictEqual(originalOptions);
-	}
-);
+	const originalOptions = { ...options };
+	const callback = vi.fn(async (delegatedOptions: ParserOptions) => {
+		await Promise.resolve();
+		expect(delegatedOptions.locEnd).toBe(currentParser.locEnd);
+		expect(delegatedOptions.locStart).toBe(currentParser.locStart);
+
+		delegatedOptions.locEnd = (node) => currentParser.locEnd(node);
+		delegatedOptions.locStart = (node) => currentParser.locStart(node);
+	});
+
+	await expect(
+		withPriorPrinterOptions(
+			options,
+			{
+				plugins: [],
+				printer: markdownPrinters.mdast,
+			},
+			callback
+		)
+	).resolves.toBeUndefined();
+
+	expect(callback).toHaveBeenCalledTimes(1);
+	expect(options).toStrictEqual(originalOptions);
+});
 
 test('restores parser delegation after rejected hooks', async () => {
 	const currentParser = getDirectParser(pluginMarkdownHTML, 'markdown');
@@ -658,190 +858,112 @@ test('restores parser delegation after rejected hooks', async () => {
 	expect(initializeParser).toHaveBeenCalledTimes(1);
 
 	const error = new Error();
+	const nextCallback = vi.fn(async (nextOptions: ParserOptions) => {
+		await Promise.resolve();
+		await expect(
+			resolvePriorParser(nextOptions, 'parse')
+		).resolves.toBeUndefined();
+
+		throw error;
+	});
+	const callback = vi.fn(async (delegatedOptions: ParserOptions) => {
+		await Promise.resolve();
+		await expect(
+			resolvePriorParser(delegatedOptions, 'parse')
+		).resolves.toBe(next);
+
+		const preprocess = await resolvePriorParser(
+			delegatedOptions,
+			'preprocess'
+		);
+
+		expect(preprocess?.delegation?.hook).toBe('preprocess');
+
+		const originalDelegatedOptions = { ...delegatedOptions };
+
+		await expect(
+			withPriorParserOptions(delegatedOptions, next, nextCallback)
+		).rejects.toBe(error);
+
+		expect(delegatedOptions).toStrictEqual(originalDelegatedOptions);
+
+		throw error;
+	});
 
 	await expect(
-		withPriorParserOptions(options, resolved, async (delegatedOptions) => {
-			await Promise.resolve();
-			await expect(
-				resolvePriorParser(delegatedOptions, 'parse')
-			).resolves.toBe(next);
-
-			const preprocess = await resolvePriorParser(
-				delegatedOptions,
-				'preprocess'
-			);
-
-			expect(preprocess?.delegation?.hook).toBe('preprocess');
-
-			const originalDelegatedOptions = { ...delegatedOptions };
-
-			await expect(
-				withPriorParserOptions(
-					delegatedOptions,
-					next,
-					async (nextOptions) => {
-						await Promise.resolve();
-						await expect(
-							resolvePriorParser(nextOptions, 'parse')
-						).resolves.toBeUndefined();
-
-						throw error;
-					}
-				)
-			).rejects.toBe(error);
-
-			expect(delegatedOptions).toStrictEqual(originalDelegatedOptions);
-
-			throw error;
-		})
+		withPriorParserOptions(options, resolved, callback)
 	).rejects.toBe(error);
 
+	expect(callback).toHaveBeenCalledTimes(1);
+	expect(nextCallback).toHaveBeenCalledTimes(1);
 	expect(options).toStrictEqual(originalOptions);
 	await expect(resolvePriorParser(options, 'parse')).resolves.toBe(resolved);
 });
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'refreshes entry `%s` options after resolved and rejected hooks',
-	async (parserName) => {
-		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
+test.each([
+	['parse', 'markdown'],
+	['parse', 'remark'],
+	['preprocess', 'markdown'],
+	['preprocess', 'remark'],
+] as const)(
+	'refreshes entry options after rejected `%s` hooks with the `%s` parser',
+	async (hook, parserName) => {
+		const {
+			locEnd,
+			locStart,
+			options,
+			reassign,
+			reassignedPlugins,
+			resolved,
+			verifyRestoration,
+		} = await createEntryOptionsFixture(hook, parserName);
+		const error = new Error();
 
-		const locEnd: Parser['locEnd'] = (node) => currentParser.locEnd(node);
-		const locStart: Parser['locStart'] = (node) =>
-			currentParser.locStart(node);
+		await expect(
+			withPriorParserOptions(
+				options,
+				resolved,
+				async (delegatedOptions) => {
+					await reassign(delegatedOptions);
 
-		for (const hook of ['parse', 'preprocess'] as const) {
-			for (const rejects of [false, true]) {
-				const priorParser: Parser = {
-					...createPriorParser(parserName),
-					locEnd: (node) => currentParser.locEnd(node),
-					locStart: (node) => currentParser.locStart(node),
-				};
-
-				const priorPlugin: Plugin = {
-					parsers: {
-						[parserName]: priorParser,
-					},
-				};
-				const removedPlugin: Plugin = {};
-				const wrapperPlugin: Plugin = {
-					parsers: {
-						[parserName]: {
-							...currentParser,
-							parse: vi.fn(currentParser.parse),
-							preprocess: vi.fn(currentParser.preprocess),
-						},
-					},
-				};
-
-				const options = {
-					astFormat: currentParser.astFormat,
-					locEnd: currentParser.locEnd,
-					locStart: currentParser.locStart,
-					parser: parserName,
-					plugins: [
-						removedPlugin,
-						priorPlugin,
-						wrapperPlugin,
-						pluginMarkdownHTML,
-					],
-				} as unknown as ParserOptions;
-
-				const originalOptions = { ...options };
-				const resolvePriorParser = createPriorParserResolver(
-					parserName,
-					currentParser.astFormat,
-					currentParser
-				);
-				const resolved = await resolvePriorParser(options, hook);
-
-				if (!resolved?.delegation) {
-					throw new Error();
+					throw error;
 				}
+			)
+		).rejects.toBe(error);
 
-				const next = await resolved.delegation.resolveNext();
+		expect(options.locEnd).toBe(locEnd);
+		expect(options.locStart).toBe(locStart);
+		expect(options.plugins).toBe(reassignedPlugins);
+		await verifyRestoration();
+	}
+);
 
-				if (!next) {
-					throw new Error();
-				}
+test.each([
+	['parse', 'markdown'],
+	['parse', 'remark'],
+	['preprocess', 'markdown'],
+	['preprocess', 'remark'],
+] as const)(
+	'refreshes entry options after resolved `%s` hooks with the `%s` parser',
+	async (hook, parserName) => {
+		const {
+			locEnd,
+			locStart,
+			options,
+			reassign,
+			reassignedPlugins,
+			resolved,
+			verifyRestoration,
+		} = await createEntryOptionsFixture(hook, parserName);
 
-				await withPriorParserOptions(
-					options,
-					resolved,
-					async (delegatedOptions) =>
-						withPriorParserOptions(
-							delegatedOptions,
-							next,
-							async () => {
-								await Promise.resolve();
-							}
-						)
-				);
+		await expect(
+			withPriorParserOptions(options, resolved, reassign)
+		).resolves.toBeUndefined();
 
-				expect(options.locEnd).toBe(
-					hook === 'parse' ? priorParser.locEnd : currentParser.locEnd
-				);
-				expect(options.locStart).toBe(
-					hook === 'parse'
-						? priorParser.locStart
-						: currentParser.locStart
-				);
-
-				await expect(resolvePriorParser(options, hook)).resolves.toBe(
-					resolved
-				);
-				expect(resolved.lifecycleState).toStrictEqual({});
-
-				const error = new Error();
-				const reassignedPlugins = [priorPlugin];
-				const result = withPriorParserOptions(
-					options,
-					resolved,
-					async (delegatedOptions) => {
-						delegatedOptions.locEnd = locEnd;
-						delegatedOptions.locStart = locStart;
-						delegatedOptions.plugins = reassignedPlugins;
-
-						await Promise.resolve();
-
-						if (rejects) {
-							throw error;
-						}
-					}
-				);
-
-				await expect(
-					result.catch((caughtError: unknown) => caughtError)
-				).resolves.toBe(rejects ? error : undefined);
-
-				expect(options.locEnd).toBe(locEnd);
-				expect(options.locStart).toBe(locStart);
-				expect(options.plugins).toBe(reassignedPlugins);
-
-				Object.assign(options, originalOptions);
-
-				await expect(resolvePriorParser(options, hook)).resolves.toBe(
-					resolved
-				);
-				await withPriorParserOptions(
-					options,
-					resolved,
-					async (delegatedOptions) => {
-						await Promise.resolve();
-						expect(delegatedOptions.locEnd).toBe(
-							currentParser.locEnd
-						);
-						expect(delegatedOptions.locStart).toBe(
-							currentParser.locStart
-						);
-						expect(delegatedOptions.plugins).toContain(
-							removedPlugin
-						);
-					}
-				);
-
-				expect(options).toStrictEqual(originalOptions);
-			}
-		}
+		expect(options.locEnd).toBe(locEnd);
+		expect(options.locStart).toBe(locStart);
+		expect(options.plugins).toBe(reassignedPlugins);
+		await verifyRestoration();
 	}
 );
 
@@ -896,56 +1018,62 @@ test('preserves plugin lists reassigned by prior hooks', async () => {
 });
 
 test('preserves parser lifecycle state after plugin list reassignment', async () => {
-	let initializationCount = 0;
 	let observedLifecycleState = false;
+	let parserLocations: Pick<ParserOptions, 'locEnd' | 'locStart'> | undefined;
 
 	const locEnd: Parser['locEnd'] = (node) =>
 		markdownParsers.markdown.locEnd(node);
 	const locStart: Parser['locStart'] = (node) =>
 		markdownParsers.markdown.locStart(node);
 
+	const initializeParser = vi.fn(async (): Promise<Parser> => {
+		let preprocessed = false;
+		await Promise.resolve();
+
+		return {
+			...markdownParsers.markdown,
+			parse: (text: string, options: ParserOptions) => {
+				observedLifecycleState = preprocessed;
+				parserLocations = {
+					locEnd: options.locEnd,
+					locStart: options.locStart,
+				};
+				return markdownParsers.markdown.parse(text, options);
+			},
+			preprocess: (text: string, options: ParserOptions) => {
+				preprocessed = true;
+				options.locEnd = locEnd;
+				options.locStart = locStart;
+				options.plugins = [...options.plugins];
+				return text;
+			},
+		};
+	});
+
 	const lazyPlugin = {
 		parsers: {
-			markdown: async () => {
-				initializationCount += 1;
-				let preprocessed = false;
-				await Promise.resolve();
-
-				return {
-					...markdownParsers.markdown,
-					parse: (text: string, options: ParserOptions) => {
-						observedLifecycleState =
-							preprocessed &&
-							options.locEnd === locEnd &&
-							options.locStart === locStart;
-						return markdownParsers.markdown.parse(text, options);
-					},
-					preprocess: (text: string, options: ParserOptions) => {
-						preprocessed = true;
-						options.locEnd = locEnd;
-						options.locStart = locStart;
-						options.plugins = [...options.plugins];
-						return text;
-					},
-				};
-			},
+			markdown: initializeParser,
 		},
 	} as unknown as Plugin;
 
-	await format('value\n', {
+	await format('foo\n', {
 		parser: 'markdown',
 		plugins: [lazyPlugin, pluginMarkdownHTML],
 	});
 
-	expect(initializationCount).toBe(1);
+	expect(initializeParser).toHaveBeenCalledTimes(1);
 	expect(observedLifecycleState).toBe(true);
+	expect(parserLocations?.locEnd).toBe(locEnd);
+	expect(parserLocations?.locStart).toBe(locStart);
 });
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'shares updated location functions between prior `%s` hooks',
+	'shares updated location functions between prior hooks with the `%s` parser',
 	async (parserName) => {
-		let hasMatchingParserLocations = false;
-		let hasMatchingPrinterLocations = false;
+		let parserLocations:
+			Pick<ParserOptions, 'locEnd' | 'locStart'> | undefined;
+		let printerLocations:
+			Pick<ParserOptions, 'locEnd' | 'locStart'> | undefined;
 
 		const nativeParser = markdownParsers[parserName];
 
@@ -958,9 +1086,10 @@ test.each(MARKDOWN_PARSER_NAMES)(
 				[parserName]: {
 					...nativeParser,
 					parse: (text, options) => {
-						hasMatchingParserLocations =
-							options.locEnd === locEnd &&
-							options.locStart === locStart;
+						parserLocations = {
+							locEnd: options.locEnd,
+							locStart: options.locStart,
+						};
 						return nativeParser.parse(text, options);
 					},
 					preprocess: async (text, options) => {
@@ -973,26 +1102,29 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			},
 			printers: {
 				mdast: createPriorPrinter('locations', (options) => {
-					hasMatchingPrinterLocations =
-						options.locEnd === locEnd &&
-						options.locStart === locStart;
+					printerLocations = {
+						locEnd: options.locEnd,
+						locStart: options.locStart,
+					};
 				}),
 			},
 		};
 
-		const output = await format('<span id = "foo">value</span>\n', {
+		const output = await format('<span id = "foo">bar</span>\n', {
 			parser: parserName,
 			plugins: [priorPlugin, pluginMarkdownHTML],
 		});
 
-		expect(output).toBe('<span id="locations">value</span>\n');
-		expect(hasMatchingParserLocations).toBe(true);
-		expect(hasMatchingPrinterLocations).toBe(true);
+		expect(output).toBe('<span id="locations">bar</span>\n');
+		expect(parserLocations?.locEnd).toBe(locEnd);
+		expect(parserLocations?.locStart).toBe(locStart);
+		expect(printerLocations?.locEnd).toBe(locEnd);
+		expect(printerLocations?.locStart).toBe(locStart);
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'prefers the prior `%s` parser plugin printer over a later printer-only plugin',
+	'prefers the prior parser plugin printer over a later printer-only plugin with the `%s` parser',
 	async (parserName) => {
 		const parserPlugin = createPriorPlugin(parserName);
 
@@ -1007,12 +1139,12 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			plugins: [parserPlugin, laterPrinterPlugin, pluginMarkdownHTML],
 		});
 
-		expect(output).toBe('Parser <span id="bar">value</span>\n');
+		expect(output).toBe('Parser <span id="bar">baz</span>\n');
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'doesn’t initialize a shadowed lazy `%s` printer',
+	'doesn’t initialize a shadowed lazy printer with the `%s` parser',
 	async (parserName) => {
 		const initializePrinter = vi.fn(async (): Promise<Printer> => {
 			await Promise.resolve();
@@ -1040,180 +1172,190 @@ test.each(MARKDOWN_PARSER_NAMES)(
 					pluginMarkdownHTML,
 				],
 			})
-		).resolves.toBe('Parser <span id="bar">value</span>\n');
+		).resolves.toBe('Parser <span id="bar">baz</span>\n');
 		expect(initializePrinter).not.toHaveBeenCalled();
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'composes copied `%s` parser wrappers without repeating hooks',
-	async (parserName) => {
-		vi.resetModules();
+test.each([
+	{ includePrior: false, mainPlugin: 'current', parserName: 'markdown' },
+	{ includePrior: false, mainPlugin: 'independent', parserName: 'markdown' },
+	{ includePrior: false, mainPlugin: 'none', parserName: 'markdown' },
+	{ includePrior: true, mainPlugin: 'current', parserName: 'markdown' },
+	{ includePrior: true, mainPlugin: 'independent', parserName: 'markdown' },
+	{ includePrior: true, mainPlugin: 'none', parserName: 'markdown' },
+	{ includePrior: false, mainPlugin: 'current', parserName: 'remark' },
+	{ includePrior: false, mainPlugin: 'independent', parserName: 'remark' },
+	{ includePrior: false, mainPlugin: 'none', parserName: 'remark' },
+	{ includePrior: true, mainPlugin: 'current', parserName: 'remark' },
+	{ includePrior: true, mainPlugin: 'independent', parserName: 'remark' },
+	{ includePrior: true, mainPlugin: 'none', parserName: 'remark' },
+] as const)(
+	'composes copied parser wrappers without repeating hooks with the `$parserName` parser',
+	async ({ includePrior, mainPlugin, parserName }) => {
+		let plugin = pluginMarkdownHTML;
 
-		const independentPlugin = await import('../index.ts');
+		if (mainPlugin === 'independent') {
+			vi.resetModules();
+			plugin = await import('../index.ts');
+		}
+
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
 
-		for (const mainPlugin of [pluginMarkdownHTML, independentPlugin]) {
-			for (const includePrior of [false, true]) {
-				for (const includeMain of [false, true]) {
-					let parseCallCount = 0;
-					let preprocessCallCount = 0;
+		let parseCallCount = 0;
+		let preprocessCallCount = 0;
 
-					const priorPlugin = createPriorPlugin(parserName);
-					const priorParser = getDirectParser(
-						priorPlugin,
-						parserName
-					);
+		const priorPlugin = createPriorPlugin(parserName);
+		const priorParser = getDirectParser(priorPlugin, parserName);
 
-					const priorParse = vi.spyOn(priorParser, 'parse');
-					const priorPreprocess = vi.spyOn(priorParser, 'preprocess');
+		const priorParse = vi.spyOn(priorParser, 'parse');
+		const priorPreprocess = vi.spyOn(priorParser, 'preprocess');
 
-					const wrapperPlugin: Plugin = {
-						parsers: {
-							[parserName]: {
-								...currentParser,
-								async parse(text, options) {
-									parseCallCount += 1;
+		const wrapperPlugin: Plugin = {
+			parsers: {
+				[parserName]: {
+					...currentParser,
+					async parse(text, options) {
+						parseCallCount += 1;
 
-									if (parseCallCount > 3) {
-										throw new Error();
-									}
+						if (parseCallCount > 3) {
+							throw new Error();
+						}
 
-									await Promise.resolve();
-									return currentParser.parse(text, options);
-								},
-								async preprocess(text, options) {
-									preprocessCallCount += 1;
+						await Promise.resolve();
+						return currentParser.parse(text, options);
+					},
+					async preprocess(text, options) {
+						preprocessCallCount += 1;
 
-									if (preprocessCallCount > 3) {
-										throw new Error();
-									}
+						if (preprocessCallCount > 3) {
+							throw new Error();
+						}
 
-									await Promise.resolve();
-									return currentParser.preprocess!(
-										text,
-										options
-									);
-								},
-							},
-						},
-					};
+						await Promise.resolve();
+						return currentParser.preprocess!(text, options);
+					},
+				},
+			},
+		};
 
-					const plugins = [
-						...(includePrior ? [priorPlugin] : []),
-						wrapperPlugin,
-						...(includeMain ? [mainPlugin] : []),
-					];
+		const mainPlugins = mainPlugin === 'none' ? [] : [plugin];
+		const plugins = [
+			...(includePrior ? [priorPlugin] : []),
+			wrapperPlugin,
+			...mainPlugins,
+		];
 
-					const output = await format('value\n', {
-						parser: parserName,
-						plugins,
-					});
+		const output = await format('foo\n', {
+			parser: parserName,
+			plugins,
+		});
 
-					expect(output).toBe(
-						includePrior
-							? 'Parser <span id="bar">value</span>\n'
-							: 'value\n'
-					);
-					expect(parseCallCount).toBe(1);
-					expect(preprocessCallCount).toBe(1);
-					expect(priorParse).toHaveBeenCalledTimes(
-						Number(includePrior)
-					);
-					expect(priorPreprocess).toHaveBeenCalledTimes(
-						Number(includePrior)
-					);
-				}
-			}
-		}
+		expect(output).toBe(
+			includePrior ? 'Parser <span id="bar">baz</span>\n' : 'foo\n'
+		);
+		expect(parseCallCount).toBe(1);
+		expect(preprocessCallCount).toBe(1);
+		expect(priorParse).toHaveBeenCalledTimes(Number(includePrior));
+		expect(priorPreprocess).toHaveBeenCalledTimes(Number(includePrior));
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'composes successive copied `%s` parser wrappers',
-	async (parserName) => {
+test.each([
+	{ includeMain: false, parserName: 'markdown' },
+	{ includeMain: true, parserName: 'markdown' },
+	{ includeMain: false, parserName: 'remark' },
+	{ includeMain: true, parserName: 'remark' },
+] as const)(
+	'composes successive copied parser wrappers with the `$parserName` parser',
+	async ({ includeMain, parserName }) => {
 		vi.resetModules();
 
 		const independentPlugin = await import('../index.ts');
 
-		for (const includeMain of [false, true]) {
-			const initializeParser = vi.fn(async (): Promise<Parser> => {
-				await Promise.resolve();
-				return createPriorParser(parserName);
-			});
+		const initializeParser = vi.fn(async (): Promise<Parser> => {
+			await Promise.resolve();
+			return createPriorParser(parserName);
+		});
 
-			const priorPlugin = {
-				parsers: {
-					[parserName]: initializeParser,
-				},
-				printers: {
-					mdast: createPriorPrinter('bar'),
-				},
-			} as unknown as Plugin;
+		const priorPlugin = {
+			parsers: {
+				[parserName]: initializeParser,
+			},
+			printers: {
+				mdast: createPriorPrinter('bar'),
+			},
+		} as unknown as Plugin;
 
-			const wrapperParsers = [pluginMarkdownHTML, independentPlugin].map(
-				(plugin) => {
-					const currentParser = getDirectParser(plugin, parserName);
-					let parseCallCount = 0;
-					let preprocessCallCount = 0;
+		const wrapperParsers = [pluginMarkdownHTML, independentPlugin].map(
+			(plugin) => {
+				const currentParser = getDirectParser(plugin, parserName);
+				let parseCallCount = 0;
+				let preprocessCallCount = 0;
 
-					return {
-						...currentParser,
-						parse: vi.fn(
-							async (text: string, options: ParserOptions) => {
-								parseCallCount += 1;
+				return {
+					...currentParser,
+					parse: vi.fn(
+						async (text: string, options: ParserOptions) => {
+							parseCallCount += 1;
 
-								if (parseCallCount > 3) {
-									throw new Error();
-								}
-
-								await Promise.resolve();
-								return currentParser.parse(text, options);
+							if (parseCallCount > 3) {
+								throw new Error();
 							}
-						),
-						preprocess: vi.fn(
-							async (text: string, options: ParserOptions) => {
-								preprocessCallCount += 1;
 
-								if (preprocessCallCount > 3) {
-									throw new Error();
-								}
+							await Promise.resolve();
+							return currentParser.parse(text, options);
+						}
+					),
+					preprocess: vi.fn(
+						async (text: string, options: ParserOptions) => {
+							preprocessCallCount += 1;
 
-								await Promise.resolve();
-								return currentParser.preprocess!(text, options);
+							if (preprocessCallCount > 3) {
+								throw new Error();
 							}
-						),
-					};
-				}
-			);
 
-			const output = await format('ignored\n', {
-				parser: parserName,
-				plugins: [
-					priorPlugin,
-					...wrapperParsers.map((parser) => ({
-						parsers: {
-							[parserName]: parser,
-						},
-					})),
-					...(includeMain ? [pluginMarkdownHTML] : []),
-				],
-			});
-
-			expect(output).toBe('Parser <span id="bar">value</span>\n');
-			expect(initializeParser).toHaveBeenCalledTimes(1);
-
-			for (const parser of wrapperParsers) {
-				expect(parser.parse).toHaveBeenCalledTimes(1);
-				expect(parser.preprocess).toHaveBeenCalledTimes(1);
+							await Promise.resolve();
+							return currentParser.preprocess!(text, options);
+						}
+					),
+				};
 			}
+		);
+
+		const output = await format('ignored\n', {
+			parser: parserName,
+			plugins: [
+				priorPlugin,
+				...wrapperParsers.map((parser) => ({
+					parsers: {
+						[parserName]: parser,
+					},
+				})),
+				...(includeMain ? [pluginMarkdownHTML] : []),
+			],
+		});
+
+		expect(output).toBe('Parser <span id="bar">baz</span>\n');
+		expect(initializeParser).toHaveBeenCalledTimes(1);
+
+		for (const hook of wrapperParsers.flatMap(({ parse, preprocess }) => [
+			parse,
+			preprocess,
+		])) {
+			expect(hook).toHaveBeenCalledTimes(1);
 		}
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'skips unchanged copied `%s` hooks from independent plugin copies',
-	async (parserName) => {
+test.each([
+	['parse', 'markdown'],
+	['parse', 'remark'],
+	['preprocess', 'markdown'],
+	['preprocess', 'remark'],
+] as const)(
+	'skips unchanged copied `%s` hooks from an independent instance with the `%s` parser',
+	async (hook, parserName) => {
 		vi.resetModules();
 
 		const independentPlugin = await import('../index.ts');
@@ -1246,37 +1388,42 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		const options = {
 			parser: parserName,
 			plugins: [priorPlugin, copiedPlugin, pluginMarkdownHTML],
-		} as ParserOptions;
+		} as unknown as ParserOptions;
 
-		for (const hook of ['parse', 'preprocess'] as const) {
-			const resolved = await resolvePriorParser(options, hook);
+		const resolved = await resolvePriorParser(options, hook);
 
-			expect(resolved?.parser).toBe(priorParser);
-			expect(resolved?.plugin).toBe(copiedPlugin);
+		expect(resolved?.parser).toBe(priorParser);
+		expect(resolved?.plugin).toBe(copiedPlugin);
 
-			if (!resolved) {
-				throw new Error();
-			}
-
-			const reassignedPlugins = [priorPlugin];
-			resolved.lifecycleState.plugins = reassignedPlugins;
-
-			expect(resolved.plugins).toBe(reassignedPlugins);
-
-			resolved.lifecycleState.plugins = [
-				pluginMarkdownHTML,
-				priorPlugin,
-				copiedPlugin,
-			];
-
-			expect(resolved.plugins).toStrictEqual(reassignedPlugins);
+		if (!resolved) {
+			throw new Error();
 		}
+
+		const reassignedPlugins = [priorPlugin];
+		resolved.lifecycleState.plugins = reassignedPlugins;
+
+		expect(resolved.plugins).toBe(reassignedPlugins);
+
+		resolved.lifecycleState.plugins = [
+			pluginMarkdownHTML,
+			priorPlugin,
+			copiedPlugin,
+		];
+
+		expect(resolved.plugins).toStrictEqual(reassignedPlugins);
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'uses copied `%s` wrapper location fields only when selected by Prettier',
-	async (parserName) => {
+test.each([
+	['after this plugin', 'markdown'],
+	['after this plugin', 'remark'],
+	['alone', 'markdown'],
+	['alone', 'remark'],
+	['before this plugin', 'markdown'],
+	['before this plugin', 'remark'],
+] as const)(
+	'uses location fields from a copied wrapper placed %s only when Prettier selects it with the `%s` parser',
+	async (placement, parserName) => {
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
 		const nativeParser = markdownParsers[parserName];
 
@@ -1308,56 +1455,57 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			},
 		};
 
-		const input = 'Parser <span id = "foo">value</span>\n';
+		const input = 'Parser <span id = "foo">bar</span>\n';
 		const options = {
-			cursorOffset: input.indexOf('value') + 2,
+			cursorOffset: input.indexOf('bar') + 2,
 			parser: parserName,
 		};
 
-		const expectedOutput = await formatWithCursor(input, {
+		const expectedResult = await formatWithCursor(input, {
 			...options,
 			plugins: [pluginMarkdownHTML],
 		});
 
-		for (const placement of ['after', 'alone', 'before'] as const) {
-			const plugins = {
-				after: [priorPlugin, pluginMarkdownHTML, wrapperPlugin],
-				alone: [priorPlugin, wrapperPlugin],
-				before: [priorPlugin, wrapperPlugin, pluginMarkdownHTML],
-			}[placement];
+		const plugins = {
+			'after this plugin': [
+				priorPlugin,
+				pluginMarkdownHTML,
+				wrapperPlugin,
+			],
+			'alone': [priorPlugin, wrapperPlugin],
+			'before this plugin': [
+				priorPlugin,
+				wrapperPlugin,
+				pluginMarkdownHTML,
+			],
+		}[placement];
 
-			const isSelectedParser = placement !== 'before';
+		const isSelectedParser = placement !== 'before this plugin';
 
-			locEnd.mockClear();
-			locStart.mockClear();
-			parse.mockClear();
-			priorLocEnd.mockClear();
-			priorLocStart.mockClear();
+		const result = await formatWithCursor(input, {
+			...options,
+			plugins,
+		});
 
-			const output = await formatWithCursor(input, {
-				...options,
-				plugins,
-			});
-
-			expect(output).toStrictEqual(expectedOutput);
-			expect(parse).toHaveBeenCalledTimes(1);
-			expect(isSelectedParser ? locEnd : priorLocEnd).toHaveBeenCalled();
-			expect(
-				isSelectedParser ? locStart : priorLocStart
-			).toHaveBeenCalled();
-			expect(
-				isSelectedParser ? priorLocEnd : locEnd
-			).not.toHaveBeenCalled();
-			expect(
-				isSelectedParser ? priorLocStart : locStart
-			).not.toHaveBeenCalled();
-		}
+		expect(result).toStrictEqual(expectedResult);
+		expect(parse).toHaveBeenCalledTimes(1);
+		expect(isSelectedParser ? locEnd : priorLocEnd).toHaveBeenCalled();
+		expect(isSelectedParser ? locStart : priorLocStart).toHaveBeenCalled();
+		expect(isSelectedParser ? priorLocEnd : locEnd).not.toHaveBeenCalled();
+		expect(
+			isSelectedParser ? priorLocStart : locStart
+		).not.toHaveBeenCalled();
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves selected copied `%s` parser locations',
-	async (parserName) => {
+test.each([
+	['after this plugin', 'markdown'],
+	['after this plugin', 'remark'],
+	['alone', 'markdown'],
+	['alone', 'remark'],
+] as const)(
+	'preserves wrapper location overrides from parser fields when placed %s with the `%s` parser',
+	async (placement, parserName) => {
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
 		const priorParser = createPriorParser(parserName);
 
@@ -1399,28 +1547,37 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			},
 		};
 
-		for (const plugins of [
-			[priorPlugin, copiedPlugin],
-			[priorPlugin, pluginMarkdownHTML, copiedPlugin],
-		]) {
-			observeOptions.mockClear();
+		const plugins = {
+			'after this plugin': [
+				priorPlugin,
+				pluginMarkdownHTML,
+				copiedPlugin,
+			],
+			'alone': [priorPlugin, copiedPlugin],
+		}[placement];
 
-			const output = await format('value\n', {
-				parser: parserName,
-				plugins,
-			});
+		const output = await format('foo\n', {
+			parser: parserName,
+			plugins,
+		});
 
-			expect(output).toBe('Parser <span id="bar">value</span>\n');
-			expect(observeOptions).toHaveBeenCalledTimes(2);
-			expect(parserOptions?.locEnd).toBe(locEnd);
-			expect(parserOptions?.locStart).toBe(locStart);
-		}
+		expect(output).toBe('Parser <span id="bar">baz</span>\n');
+		expect(observeOptions).toHaveBeenCalledTimes(2);
+		expect(parserOptions?.locEnd).toBe(locEnd);
+		expect(parserOptions?.locStart).toBe(locStart);
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves locations assigned by copied `%s` preprocessing',
-	async (parserName) => {
+test.each([
+	['after this plugin', 'markdown'],
+	['after this plugin', 'remark'],
+	['alone', 'markdown'],
+	['alone', 'remark'],
+	['before this plugin', 'markdown'],
+	['before this plugin', 'remark'],
+] as const)(
+	'preserves wrapper location overrides from the `preprocess` hook when placed %s with the `%s` parser',
+	async (placement, parserName) => {
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
 		const priorParser = createPriorParser(parserName);
 
@@ -1466,295 +1623,337 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			},
 		};
 
-		for (const plugins of [
-			[priorPlugin, copiedPlugin],
-			[priorPlugin, pluginMarkdownHTML, copiedPlugin],
-			[priorPlugin, copiedPlugin, pluginMarkdownHTML],
-		]) {
-			observeOptions.mockClear();
+		const plugins = {
+			'after this plugin': [
+				priorPlugin,
+				pluginMarkdownHTML,
+				copiedPlugin,
+			],
+			'alone': [priorPlugin, copiedPlugin],
+			'before this plugin': [
+				priorPlugin,
+				copiedPlugin,
+				pluginMarkdownHTML,
+			],
+		}[placement];
 
-			const output = await format(
-				'Parser <span id = "foo">value</span>\n',
-				{
-					parser: parserName,
-					plugins,
-				}
-			);
+		const output = await format('Parser <span id = "foo">baz</span>\n', {
+			parser: parserName,
+			plugins,
+		});
 
-			expect(output).toBe('Parser <span id="bar">value</span>\n');
-			expect(observeOptions).toHaveBeenCalledTimes(2);
-			expect(parserOptions?.locEnd).toBe(locEnd);
-			expect(parserOptions?.locStart).toBe(locStart);
-		}
+		expect(output).toBe('Parser <span id="bar">baz</span>\n');
+		expect(observeOptions).toHaveBeenCalledTimes(2);
+		expect(parserOptions?.locEnd).toBe(locEnd);
+		expect(parserOptions?.locStart).toBe(locStart);
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves independent `%s` option overrides across copied hook positions',
-	async (parserName) => {
+test.each([
+	['parse', 'after this plugin', 'markdown'],
+	['parse', 'after this plugin', 'remark'],
+	['parse', 'alone', 'markdown'],
+	['parse', 'alone', 'remark'],
+	['parse', 'before this plugin', 'markdown'],
+	['parse', 'before this plugin', 'remark'],
+	['preprocess', 'after this plugin', 'markdown'],
+	['preprocess', 'after this plugin', 'remark'],
+	['preprocess', 'alone', 'markdown'],
+	['preprocess', 'alone', 'remark'],
+	['preprocess', 'before this plugin', 'markdown'],
+	['preprocess', 'before this plugin', 'remark'],
+] as const)(
+	'passes location overrides from `%s` wrappers to the prior parser when placed %s with the `%s` parser',
+	async (hook, placement, parserName) => {
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
+		const priorParser = createPriorParser(parserName);
+		const currentHook = currentParser[hook];
+		const priorHook = priorParser[hook];
 
 		const locEnd: Parser['locEnd'] = (node) => currentParser.locEnd(node);
 		const locStart: Parser['locStart'] = (node) =>
 			currentParser.locStart(node);
 
-		for (const hook of ['parse', 'preprocess'] as const) {
-			for (const override of ['locations', 'plugins']) {
-				for (const position of ['after', 'before', 'only']) {
-					const priorParser: Parser = {
-						...createPriorParser(parserName),
-						locEnd: (node) => currentParser.locEnd(node),
-						locStart: (node) => currentParser.locStart(node),
-					};
-					const currentHook = currentParser[hook];
-					const priorHook = priorParser[hook];
+		let observedLocEnd: Parser['locEnd'] | undefined;
+		let observedLocStart: Parser['locStart'] | undefined;
+		let observedOptions: ParserOptions | undefined;
+		let observedPrinterLocEnd: Parser['locEnd'] | undefined;
+		let observedPrinterLocStart: Parser['locStart'] | undefined;
+		let hookCallCount = 0;
 
-					const removedPlugin: Plugin = {};
-					let parserOptions: ParserOptions | undefined;
-					let reassignedPlugins: ParserOptions['plugins'] | undefined;
-					let callCount = 0;
-
-					if (!currentHook || !priorHook) {
-						throw new Error();
-					}
-
-					const observeOptions = vi.fn((options: ParserOptions) => {
-						parserOptions = options;
-
-						expect(options.locEnd).toBe(
-							override === 'locations'
-								? locEnd
-								: priorParser.locEnd
-						);
-						expect(options.locStart).toBe(
-							override === 'locations'
-								? locStart
-								: priorParser.locStart
-						);
-
-						const originalPlugins = expect.arrayContaining([
-							removedPlugin,
-							priorPlugin,
-						]);
-
-						expect(options.plugins).toStrictEqual(
-							override === 'plugins'
-								? reassignedPlugins?.filter(
-										(plugin) =>
-											plugin !== pluginMarkdownHTML
-									)
-								: originalPlugins
-						);
-					});
-
-					const priorPlugin: Plugin = {
-						parsers: {
-							[parserName]: {
-								...priorParser,
-								async [hook](
-									text: string,
-									options: ParserOptions
-								) {
-									await Promise.resolve();
-									observeOptions(options);
-
-									return priorHook.call(
-										priorParser,
-										text,
-										options
-									);
-								},
-							},
-						},
-						printers: {
-							mdast: createPriorPrinter('bar', (options) => {
-								expect(options.locEnd).toBe(
-									override === 'locations'
-										? locEnd
-										: priorParser.locEnd
-								);
-								expect(options.locStart).toBe(
-									override === 'locations'
-										? locStart
-										: priorParser.locStart
-								);
-								expect(
-									options.plugins.includes(removedPlugin)
-								).toBe(override === 'locations');
-							}),
-						},
-					};
-					const wrapperPlugin: Plugin = {
-						...pluginMarkdownHTML,
-						parsers: {
-							[parserName]: {
-								...currentParser,
-								async [hook](
-									text: string,
-									options: ParserOptions
-								) {
-									callCount += 1;
-
-									if (callCount > 3) {
-										throw new Error();
-									}
-
-									if (override === 'locations') {
-										options.locEnd = locEnd;
-										options.locStart = locStart;
-									} else {
-										reassignedPlugins =
-											options.plugins.filter(
-												(plugin) =>
-													plugin !== removedPlugin &&
-													plugin !== wrapperPlugin
-											);
-
-										options.plugins = reassignedPlugins;
-									}
-
-									await Promise.resolve();
-
-									return currentHook.call(
-										currentParser,
-										text,
-										options
-									);
-								},
-							},
-						},
-					};
-
-					const plugins = [removedPlugin, priorPlugin];
-
-					if (position === 'after') {
-						plugins.push(pluginMarkdownHTML, wrapperPlugin);
-					} else if (position === 'before') {
-						plugins.push(wrapperPlugin, pluginMarkdownHTML);
-					} else {
-						plugins.push(wrapperPlugin);
-					}
-
-					const output = await format('value\n', {
-						parser: parserName,
-						plugins,
-					});
-
-					expect(output).toBe('Parser <span id="bar">value</span>\n');
-					expect(callCount).toBe(1);
-					expect(observeOptions).toHaveBeenCalledTimes(1);
-					expect(parserOptions?.locEnd).toBe(
-						override === 'locations' ? locEnd : priorParser.locEnd
-					);
-					expect(parserOptions?.locStart).toBe(
-						override === 'locations'
-							? locStart
-							: priorParser.locStart
-					);
-
-					expect(parserOptions?.plugins === reassignedPlugins).toBe(
-						override === 'plugins'
-					);
-					expect(parserOptions?.plugins).toStrictEqual(
-						expect.arrayContaining(
-							override === 'plugins' ? [priorPlugin] : plugins
-						)
-					);
-				}
-			}
+		if (!currentHook || !priorHook) {
+			throw new Error();
 		}
-	}
-);
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves options assigned before copied `%s` hooks delegate',
-	async (parserName) => {
-		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
-
-		const locEnd: Parser['locEnd'] = (node) => currentParser.locEnd(node);
-		const locStart: Parser['locStart'] = (node) =>
-			currentParser.locStart(node);
-
-		for (const hook of ['parse', 'preprocess'] as const) {
-			const priorPlugin = createPriorPlugin(parserName);
-			const priorParser = getDirectParser(priorPlugin, parserName);
-			const currentHook = currentParser[hook];
-			const priorHook = priorParser[hook];
-
-			const removedPlugin: Plugin = {};
-			let reassignedPlugins: ParserOptions['plugins'] | undefined;
-			let callCount = 0;
-
-			if (!currentHook || !priorHook) {
-				throw new Error();
-			}
-
-			const observeOptions = vi.fn((options: ParserOptions) => {
-				expect(options.locEnd).toBe(locEnd);
-				expect(options.locStart).toBe(locStart);
-				expect(options.plugins).toBe(reassignedPlugins);
-				expect(options.plugins).not.toContain(removedPlugin);
-			});
-
-			priorParser[hook] = async (text, options) => {
+		const priorPluginHook = vi.fn(
+			async (text: string, options: ParserOptions) => {
 				await Promise.resolve();
-				observeOptions(options);
+				observedLocEnd = options.locEnd;
+				observedLocStart = options.locStart;
+				observedOptions = options;
+
 				return priorHook.call(priorParser, text, options);
-			};
+			}
+		);
 
-			const wrapperPlugin: Plugin = {
-				parsers: {
-					[parserName]: {
-						...currentParser,
-						[hook]: async (
-							text: string,
-							options: ParserOptions
-						) => {
-							callCount += 1;
+		const priorPlugin: Plugin = {
+			parsers: {
+				[parserName]: {
+					...priorParser,
+					[hook]: priorPluginHook,
+				},
+			},
+			printers: {
+				mdast: createPriorPrinter('bar', (options) => {
+					observedPrinterLocEnd = options.locEnd;
+					observedPrinterLocStart = options.locStart;
+				}),
+			},
+		};
 
-							if (callCount > 3) {
-								throw new Error();
-							}
+		const wrapperPlugin: Plugin = {
+			...pluginMarkdownHTML,
+			parsers: {
+				[parserName]: {
+					...currentParser,
+					async [hook](text: string, options: ParserOptions) {
+						hookCallCount += 1;
 
-							options.locEnd = locEnd;
-							options.locStart = locStart;
-							reassignedPlugins = options.plugins.filter(
-								(plugin) =>
-									plugin !== removedPlugin &&
-									plugin !== wrapperPlugin
-							);
+						if (hookCallCount > 3) {
+							throw new Error();
+						}
 
-							options.plugins = reassignedPlugins;
-							await Promise.resolve();
-							return currentHook.call(
-								currentParser,
-								text,
-								options
-							);
-						},
+						await Promise.resolve();
+						options.locEnd = locEnd;
+						options.locStart = locStart;
+
+						return currentHook.call(currentParser, text, options);
 					},
 				},
-			};
+			},
+		};
 
-			const output = await format('ignored\n', {
-				parser: parserName,
-				plugins: [
-					removedPlugin,
-					priorPlugin,
-					wrapperPlugin,
-					pluginMarkdownHTML,
-				],
-			});
+		const plugins = {
+			'after this plugin': [
+				priorPlugin,
+				pluginMarkdownHTML,
+				wrapperPlugin,
+			],
+			'alone': [priorPlugin, wrapperPlugin],
+			'before this plugin': [
+				priorPlugin,
+				wrapperPlugin,
+				pluginMarkdownHTML,
+			],
+		}[placement];
 
-			expect(output).toBe('Parser <span id="bar">value</span>\n');
-			expect(callCount).toBe(1);
-			expect(observeOptions).toHaveBeenCalledTimes(1);
+		const output = await format('foo\n', {
+			parser: parserName,
+			plugins,
+		});
+
+		expect(observedLocEnd).toBe(locEnd);
+		expect(observedLocStart).toBe(locStart);
+		expect(priorPluginHook).toHaveBeenCalledTimes(1);
+		expect(hookCallCount).toBe(1);
+		expect(output).toBe('Parser <span id="bar">baz</span>\n');
+		expect(observedOptions?.locEnd).toBe(locEnd);
+		expect(observedOptions?.locStart).toBe(locStart);
+		expect(observedPrinterLocEnd).toBe(locEnd);
+		expect(observedPrinterLocStart).toBe(locStart);
+	}
+);
+
+test.each([
+	['parse', 'after this plugin', 'markdown'],
+	['parse', 'after this plugin', 'remark'],
+	['parse', 'alone', 'markdown'],
+	['parse', 'alone', 'remark'],
+	['parse', 'before this plugin', 'markdown'],
+	['parse', 'before this plugin', 'remark'],
+	['preprocess', 'after this plugin', 'markdown'],
+	['preprocess', 'after this plugin', 'remark'],
+	['preprocess', 'alone', 'markdown'],
+	['preprocess', 'alone', 'remark'],
+	['preprocess', 'before this plugin', 'markdown'],
+	['preprocess', 'before this plugin', 'remark'],
+] as const)(
+	'passes plugin list overrides from `%s` wrappers to the prior parser when placed %s with the `%s` parser',
+	async (hook, placement, parserName) => {
+		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
+		const priorParser = createPriorParser(parserName);
+		const currentHook = currentParser[hook];
+		const priorHook = priorParser[hook];
+
+		let observedOptions: ParserOptions | undefined;
+		let observedPlugins: ParserOptions['plugins'] | undefined;
+		let observedPrinterPlugins: ParserOptions['plugins'] | undefined;
+		let hookCallCount = 0;
+
+		if (!currentHook || !priorHook) {
+			throw new Error();
 		}
+
+		const priorPluginHook = vi.fn(
+			async (text: string, options: ParserOptions) => {
+				await Promise.resolve();
+				observedOptions = options;
+				observedPlugins = options.plugins;
+
+				return priorHook.call(priorParser, text, options);
+			}
+		);
+
+		const priorPlugin: Plugin = {
+			parsers: {
+				[parserName]: {
+					...priorParser,
+					[hook]: priorPluginHook,
+				},
+			},
+			printers: {
+				mdast: createPriorPrinter('bar', (options) => {
+					observedPrinterPlugins = options.plugins;
+				}),
+			},
+		};
+
+		const reassignedPlugins: ParserOptions['plugins'] = [priorPlugin];
+
+		const wrapperPlugin: Plugin = {
+			...pluginMarkdownHTML,
+			parsers: {
+				[parserName]: {
+					...currentParser,
+					async [hook](text: string, options: ParserOptions) {
+						hookCallCount += 1;
+
+						if (hookCallCount > 3) {
+							throw new Error();
+						}
+
+						await Promise.resolve();
+						options.plugins = reassignedPlugins;
+
+						return currentHook.call(currentParser, text, options);
+					},
+				},
+			},
+		};
+
+		const plugins = {
+			'after this plugin': [
+				priorPlugin,
+				pluginMarkdownHTML,
+				wrapperPlugin,
+			],
+			'alone': [priorPlugin, wrapperPlugin],
+			'before this plugin': [
+				priorPlugin,
+				wrapperPlugin,
+				pluginMarkdownHTML,
+			],
+		}[placement];
+
+		const output = await format('foo\n', {
+			parser: parserName,
+			plugins,
+		});
+
+		expect(observedPlugins).toBe(reassignedPlugins);
+		expect(priorPluginHook).toHaveBeenCalledTimes(1);
+		expect(hookCallCount).toBe(1);
+		expect(output).toBe('Parser <span id="bar">baz</span>\n');
+		expect(observedOptions?.plugins).toBe(reassignedPlugins);
+		expect(observedPrinterPlugins).toBe(reassignedPlugins);
+	}
+);
+
+test.each([
+	['parse', 'markdown'],
+	['parse', 'remark'],
+	['preprocess', 'markdown'],
+	['preprocess', 'remark'],
+] as const)(
+	'preserves options assigned before copied `%s` hooks delegate with the `%s` parser',
+	async (hook, parserName) => {
+		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
+
+		const locEnd: Parser['locEnd'] = (node) => currentParser.locEnd(node);
+		const locStart: Parser['locStart'] = (node) =>
+			currentParser.locStart(node);
+
+		const priorPlugin = createPriorPlugin(parserName);
+		const priorParser = getDirectParser(priorPlugin, parserName);
+		const currentHook = currentParser[hook];
+		const priorHook = priorParser[hook];
+
+		const removedPlugin: Plugin = {};
+		let reassignedPlugins: ParserOptions['plugins'] | undefined;
+		let hookCallCount = 0;
+
+		if (!currentHook || !priorHook) {
+			throw new Error();
+		}
+
+		const observeOptions = vi.fn((options: ParserOptions) => {
+			expect(options.locEnd).toBe(locEnd);
+			expect(options.locStart).toBe(locStart);
+			expect(options.plugins).toBe(reassignedPlugins);
+			expect(options.plugins).not.toContain(removedPlugin);
+		});
+
+		priorParser[hook] = async (text, options) => {
+			await Promise.resolve();
+			observeOptions(options);
+			return priorHook.call(priorParser, text, options);
+		};
+
+		const wrapperPlugin: Plugin = {
+			parsers: {
+				[parserName]: {
+					...currentParser,
+					[hook]: async (text: string, options: ParserOptions) => {
+						hookCallCount += 1;
+
+						if (hookCallCount > 3) {
+							throw new Error();
+						}
+
+						options.locEnd = locEnd;
+						options.locStart = locStart;
+						reassignedPlugins = options.plugins.filter(
+							(plugin) =>
+								plugin !== removedPlugin &&
+								plugin !== wrapperPlugin
+						);
+
+						options.plugins = reassignedPlugins;
+						await Promise.resolve();
+						return currentHook.call(currentParser, text, options);
+					},
+				},
+			},
+		};
+
+		const output = await format('ignored\n', {
+			parser: parserName,
+			plugins: [
+				removedPlugin,
+				priorPlugin,
+				wrapperPlugin,
+				pluginMarkdownHTML,
+			],
+		});
+
+		expect(output).toBe('Parser <span id="bar">baz</span>\n');
+		expect(hookCallCount).toBe(1);
+		expect(observeOptions).toHaveBeenCalledTimes(1);
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves prior `%s` locations during delegated printer preprocessing',
+	'preserves prior locations during delegated printer preprocessing with the `%s` parser',
 	async (parserName) => {
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
 		const priorPlugin = createPriorPlugin(parserName);
@@ -1765,6 +1964,11 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			currentParser.locStart(node);
 
 		let parseCallCount = 0;
+
+		const observePrinterOptions = vi.fn((options: ParserOptions) => {
+			expect(options.locEnd).toBe(priorParser.locEnd);
+			expect(options.locStart).toBe(priorParser.locStart);
+		});
 
 		const wrapperPlugin: Plugin = {
 			parsers: {
@@ -1785,10 +1989,7 @@ test.each(MARKDOWN_PARSER_NAMES)(
 				},
 			},
 			printers: {
-				mdast: createPriorPrinter('baz', (options) => {
-					expect(options.locEnd).toBe(priorParser.locEnd);
-					expect(options.locStart).toBe(priorParser.locStart);
-				}),
+				mdast: createPriorPrinter('qux', observePrinterOptions),
 			},
 		};
 
@@ -1797,13 +1998,14 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			plugins: [priorPlugin, wrapperPlugin, pluginMarkdownHTML],
 		});
 
-		expect(output).toBe('Parser <span id="baz">value</span>\n');
+		expect(output).toBe('Parser <span id="qux">baz</span>\n');
 		expect(parseCallCount).toBe(1);
+		expect(observePrinterOptions).toHaveBeenCalledTimes(1);
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'restores outer `%s` locations when a wrapper rejects a parsed AST',
+	'restores parser locations when a wrapper rejects after delegated parsing with the `%s` parser',
 	async (parserName) => {
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
 		const priorPlugin = createPriorPlugin(parserName);
@@ -1851,7 +2053,7 @@ test.each(MARKDOWN_PARSER_NAMES)(
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves explicit location resets after prior `%s` parsing',
+	'preserves explicit location resets after prior parsing with the `%s` parser',
 	async (parserName) => {
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
 		const priorParser = createPriorParser(parserName);
@@ -1874,6 +2076,11 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		};
 
 		let parseCallCount = 0;
+
+		const observePrinterOptions = vi.fn((options: ParserOptions) => {
+			expect(options.locEnd).toBe(currentParser.locEnd);
+			expect(options.locStart).toBe(currentParser.locStart);
+		});
 
 		const wrapperPlugin: Plugin = {
 			parsers: {
@@ -1898,10 +2105,7 @@ test.each(MARKDOWN_PARSER_NAMES)(
 				},
 			},
 			printers: {
-				mdast: createPriorPrinter('baz', (options) => {
-					expect(options.locEnd).toBe(currentParser.locEnd);
-					expect(options.locStart).toBe(currentParser.locStart);
-				}),
+				mdast: createPriorPrinter('qux', observePrinterOptions),
 			},
 		};
 
@@ -1910,15 +2114,15 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			plugins: [priorPlugin, wrapperPlugin, pluginMarkdownHTML],
 		});
 
-		expect(output).toBe('Parser <span id="baz">value</span>\n');
+		expect(output).toBe('Parser <span id="qux">baz</span>\n');
 		expect(parseCallCount).toBe(1);
+		expect(observePrinterOptions).toHaveBeenCalledTimes(1);
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves reassigned plugin lists between prior `%s` hooks',
+	'preserves reassigned plugin lists between prior hooks with the `%s` parser',
 	async (parserName) => {
-		let initializationCount = 0;
 		let observedLifecycleState = false;
 		let reassignedPlugins: ParserOptions['plugins'] | undefined;
 		let parserPlugins: ParserOptions['plugins'] | undefined;
@@ -1936,33 +2140,34 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			},
 		};
 
+		const initializeParser = vi.fn(async (): Promise<Parser> => {
+			let preprocessed = false;
+			await Promise.resolve();
+
+			return {
+				...priorParser,
+				parse(text: string, options: ParserOptions) {
+					observedLifecycleState = preprocessed;
+					parserPlugins = options.plugins;
+					return options.plugins.includes(removedPlugin)
+						? removedParse(text, options)
+						: priorParser.parse(text, options);
+				},
+				async preprocess(text: string, options: ParserOptions) {
+					preprocessed = true;
+					reassignedPlugins = options.plugins.filter(
+						(plugin) => plugin !== removedPlugin
+					);
+
+					options.plugins = reassignedPlugins;
+					return priorParser.preprocess!(text, options);
+				},
+			};
+		});
+
 		const priorPlugin = {
 			parsers: {
-				[parserName]: async () => {
-					initializationCount += 1;
-					let preprocessed = false;
-					await Promise.resolve();
-
-					return {
-						...priorParser,
-						parse(text: string, options: ParserOptions) {
-							observedLifecycleState = preprocessed;
-							parserPlugins = options.plugins;
-							return options.plugins.includes(removedPlugin)
-								? removedParse(text, options)
-								: priorParser.parse(text, options);
-						},
-						async preprocess(text: string, options: ParserOptions) {
-							preprocessed = true;
-							reassignedPlugins = options.plugins.filter(
-								(plugin) => plugin !== removedPlugin
-							);
-
-							options.plugins = reassignedPlugins;
-							return priorParser.preprocess!(text, options);
-						},
-					};
-				},
+				[parserName]: initializeParser,
 			},
 			printers: {
 				mdast: createPriorPrinter('bar', (options) => {
@@ -1976,8 +2181,8 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			plugins: [removedPlugin, priorPlugin, pluginMarkdownHTML],
 		});
 
-		expect(output).toBe('Parser <span id="bar">value</span>\n');
-		expect(initializationCount).toBe(1);
+		expect(output).toBe('Parser <span id="bar">baz</span>\n');
+		expect(initializeParser).toHaveBeenCalledTimes(1);
 		expect(observedLifecycleState).toBe(true);
 		expect(parserPlugins).toBe(reassignedPlugins);
 		expect(printerPlugins).toBe(reassignedPlugins);
@@ -1985,11 +2190,96 @@ test.each(MARKDOWN_PARSER_NAMES)(
 	}
 );
 
-test.each(MARKDOWN_PARSER_NAMES)(
-	'preserves prior `%s` AST locations through copied wrappers',
-	async (parserName) => {
+test.each([
+	{
+		delegates: false,
+		parserName: 'markdown',
+		placement: 'after this plugin',
+		scenario: 'through an unchanged wrapper placed after this plugin',
+	},
+	{
+		delegates: false,
+		parserName: 'markdown',
+		placement: 'alone',
+		scenario: 'through an unchanged wrapper placed alone',
+	},
+	{
+		delegates: false,
+		parserName: 'markdown',
+		placement: 'before this plugin',
+		scenario: 'through an unchanged wrapper placed before this plugin',
+	},
+	{
+		delegates: false,
+		parserName: 'markdown',
+		placement: 'none',
+		scenario: 'without a wrapper',
+	},
+	{
+		delegates: false,
+		parserName: 'remark',
+		placement: 'after this plugin',
+		scenario: 'through an unchanged wrapper placed after this plugin',
+	},
+	{
+		delegates: false,
+		parserName: 'remark',
+		placement: 'alone',
+		scenario: 'through an unchanged wrapper placed alone',
+	},
+	{
+		delegates: false,
+		parserName: 'remark',
+		placement: 'before this plugin',
+		scenario: 'through an unchanged wrapper placed before this plugin',
+	},
+	{
+		delegates: false,
+		parserName: 'remark',
+		placement: 'none',
+		scenario: 'without a wrapper',
+	},
+	{
+		delegates: true,
+		parserName: 'markdown',
+		placement: 'after this plugin',
+		scenario: 'through a delegating wrapper placed after this plugin',
+	},
+	{
+		delegates: true,
+		parserName: 'markdown',
+		placement: 'alone',
+		scenario: 'through a delegating wrapper placed alone',
+	},
+	{
+		delegates: true,
+		parserName: 'markdown',
+		placement: 'before this plugin',
+		scenario: 'through a delegating wrapper placed before this plugin',
+	},
+	{
+		delegates: true,
+		parserName: 'remark',
+		placement: 'after this plugin',
+		scenario: 'through a delegating wrapper placed after this plugin',
+	},
+	{
+		delegates: true,
+		parserName: 'remark',
+		placement: 'alone',
+		scenario: 'through a delegating wrapper placed alone',
+	},
+	{
+		delegates: true,
+		parserName: 'remark',
+		placement: 'before this plugin',
+		scenario: 'through a delegating wrapper placed before this plugin',
+	},
+] as const)(
+	'preserves prior AST locations $scenario with the `$parserName` parser',
+	async ({ delegates, parserName, placement }) => {
 		const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
-		const input = 'Parser <span id = "foo">value</span>\n';
+		const input = 'Parser <span id = "foo">baz</span>\n';
 		const priorParser = createPriorParser(parserName);
 		const positions = new WeakMap<AST.Node, AST.Position>();
 
@@ -1998,10 +2288,31 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		const locStart: Parser['locStart'] = (node: AST.Node) =>
 			positions.get(node)?.start.offset ?? priorParser.locStart(node);
 
-		const priorPrinter = createPriorPrinter('bar', (options) => {
+		const observePrinterOptions = vi.fn((options: ParserOptions) => {
 			expect(options.locEnd).toBe(locEnd);
 			expect(options.locStart).toBe(locStart);
 		});
+		const priorPrinter = createPriorPrinter('bar', observePrinterOptions);
+		const preprocess = vi.fn(
+			(ast: AST.RootNode, options: ParserOptions) => {
+				expect(options.locEnd(ast)).toBe(
+					positions.get(ast)?.end.offset
+				);
+				expect(options.locStart(ast)).toBe(
+					positions.get(ast)?.start.offset
+				);
+
+				for (const node of [ast, ...ast.children]) {
+					const position = positions.get(node);
+
+					if (position) {
+						node.position = position;
+					}
+				}
+
+				return priorPrinter.preprocess!(ast, options);
+			}
+		);
 
 		const priorPlugin: Plugin = {
 			parsers: {
@@ -2029,84 +2340,76 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			printers: {
 				mdast: {
 					...priorPrinter,
-					preprocess(ast: AST.RootNode, options) {
-						expect(options.locEnd(ast)).toBe(
-							positions.get(ast)?.end.offset
-						);
-						expect(options.locStart(ast)).toBe(
-							positions.get(ast)?.start.offset
-						);
-
-						for (const node of [ast, ...ast.children]) {
-							const position = positions.get(node);
-
-							if (position) {
-								node.position = position;
-							}
-						}
-
-						return priorPrinter.preprocess!(ast, options);
-					},
+					preprocess,
 				},
 			},
 		};
 
 		const options = {
-			cursorOffset: input.indexOf('value') + 2,
+			cursorOffset: input.indexOf('baz') + 2,
 			parser: parserName,
 		};
 
-		const expectedOutput = await formatWithCursor(input, {
+		const expectedResult = await formatWithCursor(input, {
 			...options,
 			plugins: [priorPlugin],
 		});
 
-		expect(expectedOutput.formatted).toBe(
-			'Parser <span id="bar">value</span>\n'
+		observePrinterOptions.mockClear();
+		preprocess.mockClear();
+
+		expect(expectedResult.formatted).toBe(
+			'Parser <span id="bar">baz</span>\n'
 		);
 
-		for (const delegates of [false, true]) {
-			const copiedParser: Parser = { ...currentParser };
+		const copiedParser: Parser = { ...currentParser };
 
-			if (delegates) {
-				copiedParser.parse = (text, options) =>
-					currentParser.parse(text, options);
-			}
-
-			const wrapperPlugin: Plugin = {
-				...pluginMarkdownHTML,
-				parsers: {
-					[parserName]: copiedParser,
-				},
-			};
-
-			for (const plugins of [
-				[priorPlugin, pluginMarkdownHTML],
-				[priorPlugin, wrapperPlugin],
-				[priorPlugin, pluginMarkdownHTML, wrapperPlugin],
-				[priorPlugin, wrapperPlugin, pluginMarkdownHTML],
-			]) {
-				const output = await format(input, {
-					parser: parserName,
-					plugins,
-				});
-				const outputWithCursor = await formatWithCursor(input, {
-					...options,
-					plugins,
-				});
-
-				expect(output).toBe(expectedOutput.formatted);
-				expect(outputWithCursor).toStrictEqual(expectedOutput);
-				expect(outputWithCursor.cursorOffset).toBe(
-					outputWithCursor.formatted.indexOf('value') + 2
-				);
-			}
+		if (delegates) {
+			copiedParser.parse = (text, options) =>
+				currentParser.parse(text, options);
 		}
+
+		const wrapperPlugin: Plugin = {
+			...pluginMarkdownHTML,
+			parsers: {
+				[parserName]: copiedParser,
+			},
+		};
+
+		const plugins = {
+			'after this plugin': [
+				priorPlugin,
+				pluginMarkdownHTML,
+				wrapperPlugin,
+			],
+			'alone': [priorPlugin, wrapperPlugin],
+			'before this plugin': [
+				priorPlugin,
+				wrapperPlugin,
+				pluginMarkdownHTML,
+			],
+			'none': [priorPlugin, pluginMarkdownHTML],
+		}[placement];
+
+		const output = await format(input, {
+			parser: parserName,
+			plugins,
+		});
+		const result = await formatWithCursor(input, {
+			...options,
+			plugins,
+		});
+
+		expect(output).toBe(expectedResult.formatted);
+		expect(result).toStrictEqual(expectedResult);
+		expect(result.cursorOffset).toBe(result.formatted.indexOf('baz') + 2);
+		expect(preprocess).toHaveBeenCalledTimes(2);
+		expect(observePrinterOptions).toHaveBeenCalledTimes(2);
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'avoids recursion through `%s` wrappers that inherit from the current parser',
+	'avoids recursion through wrappers that inherit from the current parser with the `%s` parser',
 	async (parserName) => {
 		const parser = getDirectParser(pluginMarkdownHTML, parserName);
 		let parseCallCount = 0;
@@ -2129,12 +2432,12 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			parsers: { [parserName]: wrapperParser },
 		};
 
-		const expectedOutput = await format('value\n', {
+		const expectedOutput = await format('foo\n', {
 			parser: parserName,
 			plugins: [wrapperPlugin],
 		});
 
-		const output = await format('value\n', {
+		const output = await format('foo\n', {
 			parser: parserName,
 			plugins: [wrapperPlugin, pluginMarkdownHTML],
 		});
@@ -2145,10 +2448,11 @@ test.each(MARKDOWN_PARSER_NAMES)(
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'composes a copied `%s` parser wrapper’s distinct printer',
+	'composes a copied parser wrapper’s distinct printer with the `%s` parser',
 	async (parserName) => {
-		let hasMatchingLocations = false;
 		let includesCurrentPlugin: boolean | undefined;
+		let printerLocations:
+			Pick<ParserOptions, 'locEnd' | 'locStart'> | undefined;
 
 		const priorPlugin = createPriorPlugin(parserName);
 		const priorParser = getDirectParser(priorPlugin, parserName);
@@ -2168,9 +2472,10 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			},
 			printers: {
 				mdast: createPriorPrinter('copied', (options) => {
-					hasMatchingLocations =
-						options.locEnd === priorParser.locEnd &&
-						options.locStart === priorParser.locStart;
+					printerLocations = {
+						locEnd: options.locEnd,
+						locStart: options.locStart,
+					};
 					includesCurrentPlugin =
 						options.plugins.includes(pluginMarkdownHTML);
 				}),
@@ -2182,14 +2487,15 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			plugins: [priorPlugin, copiedParserPlugin, pluginMarkdownHTML],
 		});
 
-		expect(output).toBe('Parser <span id="copied">value</span>\n');
-		expect(hasMatchingLocations).toBe(true);
+		expect(output).toBe('Parser <span id="copied">baz</span>\n');
+		expect(printerLocations?.locEnd).toBe(priorParser.locEnd);
+		expect(printerLocations?.locStart).toBe(priorParser.locStart);
 		expect(includesCurrentPlugin).toBe(false);
 	}
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'composes and caches a lazy prior `%s` printer initializer',
+	'composes and caches a lazy prior printer initializer with the `%s` parser',
 	async (parserName) => {
 		const initializePrinter = vi.fn(async (): Promise<Printer> => {
 			await Promise.resolve();
@@ -2214,82 +2520,46 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			plugins: [priorPlugin, pluginMarkdownHTML],
 		});
 
-		expect(output).toBe('Parser <span id="lazy">value</span>\n');
+		expect(output).toBe('Parser <span id="lazy">baz</span>\n');
 		expect(initializePrinter).toHaveBeenCalledTimes(1);
 	}
 );
 
-test('works with independently loaded plugin copies', async () => {
-	vi.resetModules();
+test.each(MARKDOWN_PARSER_NAMES)(
+	'works with independently loaded plugin copies with the `%s` parser',
+	async (parserName) => {
+		vi.resetModules();
 
-	const firstPlugin = await import('../index.ts');
+		const firstPlugin = await import('../index.ts');
 
-	vi.resetModules();
+		vi.resetModules();
 
-	const secondPlugin = await import('../index.ts');
+		const secondPlugin = await import('../index.ts');
 
-	expect(getDirectParser(firstPlugin, 'markdown').parse).not.toBe(
-		getDirectParser(secondPlugin, 'markdown').parse
-	);
-	expect(getMdastPrinter(firstPlugin).preprocess).not.toBe(
-		getMdastPrinter(secondPlugin).preprocess
-	);
+		expect(getDirectParser(firstPlugin, parserName).parse).not.toBe(
+			getDirectParser(secondPlugin, parserName).parse
+		);
+		expect(getMdastPrinter(firstPlugin).preprocess).not.toBe(
+			getMdastPrinter(secondPlugin).preprocess
+		);
 
-	const input = '<div id = "foo">value</div>\n';
+		const input = '<div id = "foo">bar</div>\n';
 
-	const singleCopyOutput = await format(input, {
-		parser: 'markdown',
-		plugins: [secondPlugin],
-	});
+		const expectedOutput = await format(input, {
+			parser: parserName,
+			plugins: [secondPlugin],
+		});
 
-	const duplicateCopyOutput = await format(input, {
-		parser: 'markdown',
-		plugins: [firstPlugin, secondPlugin],
-	});
+		const output = await format(input, {
+			parser: parserName,
+			plugins: [firstPlugin, secondPlugin],
+		});
 
-	expect(duplicateCopyOutput).toBe(singleCopyOutput);
-});
+		expect(output).toBe(expectedOutput);
+	}
+);
 
-async function formatWithIncompatiblePriorParser(
-	parserName: (typeof MARKDOWN_PARSER_NAMES)[number]
-): Promise<string> {
-	const priorPlugin: Plugin = {
-		parsers: {
-			[parserName]: {
-				...markdownParsers[parserName],
-				astFormat: 'incompatible-mdast',
-			},
-		},
-	};
-
-	return format('value\n', {
-		parser: parserName,
-		plugins: [priorPlugin, pluginMarkdownHTML],
-	});
-}
-
-async function formatWithIncompatibleWrapper(
-	parserName: (typeof MARKDOWN_PARSER_NAMES)[number]
-): Promise<string> {
-	const currentParser = getDirectParser(pluginMarkdownHTML, parserName);
-
-	const wrapperPlugin: Plugin = {
-		parsers: {
-			[parserName]: {
-				...currentParser,
-				astFormat: 'incompatible-mdast',
-				preprocess: undefined,
-			},
-		},
-	};
-
-	return format('value\n', {
-		parser: parserName,
-		plugins: [wrapperPlugin, pluginMarkdownHTML],
-	});
-}
-
-test('rejects incompatible `markdown` wrappers before skipping shared hooks', async () => {
+test('rejects incompatible wrappers before skipping shared hooks with the `markdown` parser', async () => {
 	await expect(
 		formatWithIncompatibleWrapper('markdown')
 	).rejects.toThrowErrorMatchingInlineSnapshot(
@@ -2297,7 +2567,7 @@ test('rejects incompatible `markdown` wrappers before skipping shared hooks', as
 	);
 });
 
-test('rejects incompatible `remark` wrappers before skipping shared hooks', async () => {
+test('rejects incompatible wrappers before skipping shared hooks with the `remark` parser', async () => {
 	await expect(
 		formatWithIncompatibleWrapper('remark')
 	).rejects.toThrowErrorMatchingInlineSnapshot(
@@ -2305,7 +2575,7 @@ test('rejects incompatible `remark` wrappers before skipping shared hooks', asyn
 	);
 });
 
-test('rejects prior `markdown` parsers with incompatible AST formats', async () => {
+test('rejects prior parsers with incompatible AST formats with the `markdown` parser', async () => {
 	await expect(
 		formatWithIncompatiblePriorParser('markdown')
 	).rejects.toThrowErrorMatchingInlineSnapshot(
@@ -2313,7 +2583,7 @@ test('rejects prior `markdown` parsers with incompatible AST formats', async () 
 	);
 });
 
-test('rejects prior `remark` parsers with incompatible AST formats', async () => {
+test('rejects prior parsers with incompatible AST formats with the `remark` parser', async () => {
 	await expect(
 		formatWithIncompatiblePriorParser('remark')
 	).rejects.toThrowErrorMatchingInlineSnapshot(

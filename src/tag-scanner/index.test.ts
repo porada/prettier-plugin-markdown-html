@@ -10,6 +10,13 @@ type TagScannerInternals = {
 	};
 };
 
+const TEST_HTML =
+	'<?ignored?><section><div title="<aside>"></div>' +
+	'<!-- <span> --><script>const foo = "<div>";' +
+	' "</scriptx>";</script \n><p>';
+
+const TEST_HTML_UNCLOSED_TAGS = ['section', 'p'];
+
 test('finds unclosed tags in an HTML fragment', () => {
 	expect(TagScanner.scan('foo')).toStrictEqual([]);
 
@@ -47,7 +54,7 @@ test('scans complete HTML fragments incrementally', () => {
 	scanner.consume('--><script>');
 	expect(scanner.getUnclosedTags()).toStrictEqual(['div', 'script']);
 
-	scanner.consume('const value = "<p>";');
+	scanner.consume('const bar = "<p>";');
 	expect(scanner.getUnclosedTags()).toStrictEqual(['div', 'script']);
 
 	scanner.consume('</script></div>');
@@ -55,52 +62,48 @@ test('scans complete HTML fragments incrementally', () => {
 	expect(scanner.getUnclosedTags()).toStrictEqual([]);
 });
 
-test('scans HTML at every chunk boundary', () => {
-	const html =
-		'<?ignored?><section><div title="<aside>"></div>' +
-		'<!-- <span> --><script>const value = "<div>";' +
-		' "</scriptx>";</script \n><p>';
-	const expectedUnclosedTags = ['section', 'p'];
+test('scans HTML as one chunk and as single-character chunks', () => {
+	expect(TagScanner.scan(TEST_HTML)).toStrictEqual(TEST_HTML_UNCLOSED_TAGS);
 
-	expect(TagScanner.scan(html)).toStrictEqual(expectedUnclosedTags);
+	const scanner = new TagScanner();
 
-	for (let index = 0; index <= html.length; index += 1) {
-		const scanner = new TagScanner();
-
-		scanner.consume(html.slice(0, index));
-		scanner.consume(html.slice(index));
-
-		expect(scanner.getUnclosedTags()).toStrictEqual(expectedUnclosedTags);
+	for (const character of TEST_HTML) {
+		scanner.consume(character);
 	}
 
-	const characterScanner = new TagScanner();
-
-	for (const character of html) {
-		characterScanner.consume(character);
-	}
-
-	expect(characterScanner.getUnclosedTags()).toStrictEqual(
-		expectedUnclosedTags
-	);
+	expect(scanner.getUnclosedTags()).toStrictEqual(TEST_HTML_UNCLOSED_TAGS);
 });
 
-test('discards invalid markup split across chunks', () => {
-	const cases: Array<[string[], string[]]> = [
-		[['</', '!<p>'], ['p']],
-		[['<!', 'x<p>'], ['p']],
-		[['<!-', 'x<p>'], ['p']],
-		[['<div', '_<p>'], ['p']],
-		[['<div title="value"', '<p>'], ['p']],
-		[
-			['<div title="<p>', '"<x>'],
-			['p', 'x'],
-		],
-		[[`<a "<b '"`, `<c>'>`], ['b']],
-		[['<x-', '_>'], ['x-']],
-		[['<x-y', '_>'], ['x-']],
-	];
+test.each(Array.from({ length: TEST_HTML.length + 1 }, (_, index) => index))(
+	'scans HTML split into two chunks at offset %i',
+	(index) => {
+		const scanner = new TagScanner();
 
-	for (const [chunks, expectedUnclosedTags] of cases) {
+		scanner.consume(TEST_HTML.slice(0, index));
+		scanner.consume(TEST_HTML.slice(index));
+
+		expect(scanner.getUnclosedTags()).toStrictEqual(
+			TEST_HTML_UNCLOSED_TAGS
+		);
+	}
+);
+
+test.each([
+	[['</', '!<p>'], ['p']],
+	[['<!', 'x<p>'], ['p']],
+	[['<!-', 'x<p>'], ['p']],
+	[['<div', '_<p>'], ['p']],
+	[['<div title="foo"', '<p>'], ['p']],
+	[
+		['<div title="<p>', '"<foo>'],
+		['p', 'foo'],
+	],
+	[[`<foo "<bar '"`, `<baz>'>`], ['bar']],
+	[['<x-', '_>'], ['x-']],
+	[['<x-y', '_>'], ['x-']],
+])(
+	'discards invalid markup split across chunks',
+	(chunks, expectedUnclosedTags) => {
 		const scanner = new TagScanner();
 
 		for (const chunk of chunks) {
@@ -109,7 +112,7 @@ test('discards invalid markup split across chunks', () => {
 
 		expect(scanner.getUnclosedTags()).toStrictEqual(expectedUnclosedTags);
 	}
-});
+);
 
 test('scans tags split into many chunks', () => {
 	const scanner = new TagScanner();
@@ -125,7 +128,7 @@ test('scans tags split into many chunks', () => {
 	expect(internals.pendingMarkup?.chunks).toHaveLength(1);
 
 	for (let index = 0; index < 20_000; index += 1) {
-		scanner.consume('x');
+		scanner.consume('foo');
 	}
 
 	scanner.consume('">');
@@ -188,19 +191,19 @@ test('handles raw text HTML tags', () => {
 test('handles optional HTML end tags', () => {
 	expect(
 		TagScanner.scan(
-			'<ul><li id="a" class="x">one<li id="b" class="y">two</ul>'
+			'<ul><li id="foo" class="bar">baz<li id="qux" class="quux">corge</ul>'
 		)
 	).toStrictEqual([]);
-	expect(TagScanner.scan('<dl><dt>term<dd>definition</dl>')).toStrictEqual(
-		[]
-	);
+	expect(TagScanner.scan('<dl><dt>foo<dd>bar</dl>')).toStrictEqual([]);
 	expect(TagScanner.scan('<div><p>foo</div>')).toStrictEqual([]);
 	expect(TagScanner.scan('<ruby><rt>foo<rp>(</ruby>')).toStrictEqual([]);
 	expect(
-		TagScanner.scan('<select><optgroup><option>one<option>two</select>')
+		TagScanner.scan('<select><optgroup><option>foo<option>bar</select>')
 	).toStrictEqual([]);
 	expect(
-		TagScanner.scan('<table><thead><tr><th>a<tbody><tr><td>b<td>c</table>')
+		TagScanner.scan(
+			'<table><thead><tr><th>foo<tbody><tr><td>bar<td>baz</table>'
+		)
 	).toStrictEqual([]);
 	expect(
 		TagScanner.scan(

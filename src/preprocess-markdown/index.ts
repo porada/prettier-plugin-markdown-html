@@ -190,7 +190,7 @@ async function formatHTMLGroup(
 		return [node];
 	}
 
-	// Prettier’s HTML parser requires raw-text elements to have a closing tag,
+	// Prettier’s HTML parser requires raw text elements to have a closing tag,
 	// while the Markdown syntax tree represents inline opening and closing
 	// tags as separate nodes
 	const parseableHTML = rawTextTag ? `${html}</${rawTextTag}>` : html;

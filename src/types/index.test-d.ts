@@ -34,18 +34,21 @@ test('exposes valid types', () => {
 	expectTypeOf<ParserName>().toEqualTypeOf<'markdown' | 'remark'>();
 	expectTypeOf<ParseWithCompatibility>().toBeFunction();
 
-	expectTypeOf<PluginOptions>().toBeObject();
-	expectTypeOf<PluginOptions>().toHaveProperty('htmlFragmentBracketSameLine');
-	expectTypeOf<PluginOptions>().toHaveProperty(
-		'htmlFragmentEmbeddedLanguageFormatting'
-	);
-	expectTypeOf<PluginOptions>().toHaveProperty('htmlFragmentPrintWidth');
-	expectTypeOf<PluginOptions>().toHaveProperty(
-		'htmlFragmentSingleAttributePerLine'
-	);
-	expectTypeOf<PluginOptions>().toHaveProperty(
-		'htmlFragmentWhitespaceSensitivity'
-	);
+	expectTypeOf<PluginOptions>()
+		.toHaveProperty('htmlFragmentBracketSameLine')
+		.toEqualTypeOf<PrettierOptions['bracketSameLine']>();
+	expectTypeOf<PluginOptions>()
+		.toHaveProperty('htmlFragmentEmbeddedLanguageFormatting')
+		.toEqualTypeOf<PrettierOptions['embeddedLanguageFormatting']>();
+	expectTypeOf<PluginOptions>()
+		.toHaveProperty('htmlFragmentPrintWidth')
+		.toEqualTypeOf<PrettierOptions['printWidth']>();
+	expectTypeOf<PluginOptions>()
+		.toHaveProperty('htmlFragmentSingleAttributePerLine')
+		.toEqualTypeOf<PrettierOptions['singleAttributePerLine']>();
+	expectTypeOf<PluginOptions>()
+		.toHaveProperty('htmlFragmentWhitespaceSensitivity')
+		.toEqualTypeOf<PrettierOptions['htmlWhitespaceSensitivity']>();
 
 	expectTypeOf<PluginWithParsers>().toBeObject();
 	expectTypeOf<PluginWithParsers>().toHaveProperty('parsers');
@@ -86,17 +89,19 @@ test('extends Prettier’s `Options`', () => {
 	expectTypeOf<PrettierOptions>().toBeObject();
 	expectTypeOf<PrettierOptions>().toHaveProperty('useTabs');
 
-	expectTypeOf<PrettierOptions>().toHaveProperty(
-		'htmlFragmentBracketSameLine'
-	);
-	expectTypeOf<PrettierOptions>().toHaveProperty(
-		'htmlFragmentEmbeddedLanguageFormatting'
-	);
-	expectTypeOf<PrettierOptions>().toHaveProperty('htmlFragmentPrintWidth');
-	expectTypeOf<PrettierOptions>().toHaveProperty(
-		'htmlFragmentSingleAttributePerLine'
-	);
-	expectTypeOf<PrettierOptions>().toHaveProperty(
-		'htmlFragmentWhitespaceSensitivity'
-	);
+	expectTypeOf<PrettierOptions>()
+		.toHaveProperty('htmlFragmentBracketSameLine')
+		.toEqualTypeOf<PrettierOptions['bracketSameLine']>();
+	expectTypeOf<PrettierOptions>()
+		.toHaveProperty('htmlFragmentEmbeddedLanguageFormatting')
+		.toEqualTypeOf<PrettierOptions['embeddedLanguageFormatting']>();
+	expectTypeOf<PrettierOptions>()
+		.toHaveProperty('htmlFragmentPrintWidth')
+		.toEqualTypeOf<PrettierOptions['printWidth']>();
+	expectTypeOf<PrettierOptions>()
+		.toHaveProperty('htmlFragmentSingleAttributePerLine')
+		.toEqualTypeOf<PrettierOptions['singleAttributePerLine']>();
+	expectTypeOf<PrettierOptions>()
+		.toHaveProperty('htmlFragmentWhitespaceSensitivity')
+		.toEqualTypeOf<PrettierOptions['htmlWhitespaceSensitivity']>();
 });

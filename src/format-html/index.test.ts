@@ -1,6 +1,6 @@
 import { format } from 'prettier';
 import * as pluginHTML from 'prettier/plugins/html';
-import { expect, test, vi } from 'vite-plus/test';
+import { beforeEach, expect, test, vi } from 'vite-plus/test';
 import formatHTML from './index.ts';
 
 vi.mock(import('prettier'), async (importActual) => {
@@ -12,28 +12,34 @@ vi.mock(import('prettier'), async (importActual) => {
 	};
 });
 
-test('formats HTML', async () => {
-	let result = await formatHTML('foo');
+beforeEach(() => {
+	vi.clearAllMocks();
+});
 
-	expect(result).toBe('foo');
+test('formats HTML', async () => {
+	const output = await formatHTML('foo');
+
+	expect(output).toBe('foo');
 	expect(format).toHaveBeenCalledWith('foo', {
 		endOfLine: 'lf',
 		filepath: 'prettier-plugin-markdown-html.html',
 		parser: 'html',
 		plugins: [pluginHTML],
 	});
+});
 
-	result = await formatHTML('bar', {
+test('overrides line endings, appends plugins, and omits parser options', async () => {
+	const output = await formatHTML('foo', {
 		endOfLine: 'crlf',
-		plugins: ['prettier-plugin-baz'],
+		plugins: ['prettier-plugin-bar'],
 		printer: vi.fn(),
 	});
 
-	expect(result).toBe('bar');
-	expect(format).toHaveBeenCalledWith('bar', {
+	expect(output).toBe('foo');
+	expect(format).toHaveBeenCalledWith('foo', {
 		endOfLine: 'lf',
 		filepath: 'prettier-plugin-markdown-html.html',
 		parser: 'html',
-		plugins: [pluginHTML, 'prettier-plugin-baz'],
+		plugins: [pluginHTML, 'prettier-plugin-bar'],
 	});
 });
