@@ -3,19 +3,29 @@ import { expect, test } from 'vite-plus/test';
 import collectHTMLGroup from './index.ts';
 
 test('returns an empty group without an HTML node at the starting index', () => {
-	const children: AST.Node[][] = [
-		[],
-		[{ type: 'html' }],
-		[{ type: 'text', value: 'foo' }],
-		Array.from<AST.Node>({ length: 1 }),
-	];
+	expect(collectHTMLGroup([], 0, '')).toStrictEqual({
+		value: '',
+		children: [],
+	});
 
-	for (const nodes of children) {
-		expect(collectHTMLGroup(nodes, 0, '')).toStrictEqual({
-			value: '',
-			children: [],
-		});
-	}
+	expect(collectHTMLGroup([{ type: 'html' }], 0, '')).toStrictEqual({
+		value: '',
+		children: [],
+	});
+
+	expect(
+		collectHTMLGroup([{ type: 'text', value: 'foo' }], 0, '')
+	).toStrictEqual({
+		value: '',
+		children: [],
+	});
+
+	expect(
+		collectHTMLGroup(Array.from<AST.Node>({ length: 1 }), 0, '')
+	).toStrictEqual({
+		value: '',
+		children: [],
+	});
 });
 
 test('collects adjacent HTML from the starting index without changing nodes', () => {
@@ -196,7 +206,7 @@ test.each([
 	}
 );
 
-test('handles source positions on only one node', () => {
+test('joins HTML with one newline when only one node has a source position', () => {
 	const opening: AST.HTMLNode = {
 		type: 'html',
 		value: '<div>',
@@ -214,15 +224,23 @@ test('handles source positions on only one node', () => {
 		},
 	};
 
-	for (const children of [
-		[opening, { type: 'html', value: closing.value }],
-		[{ type: 'html', value: opening.value }, closing],
-	]) {
-		expect(collectHTMLGroup(children, 0, '')).toStrictEqual({
-			value: '<div>\n</div>',
-			children,
-		});
-	}
+	const childrenWithOpeningPosition = [
+		opening,
+		{ type: 'html', value: closing.value },
+	];
+	const childrenWithClosingPosition = [
+		{ type: 'html', value: opening.value },
+		closing,
+	];
+
+	expect(collectHTMLGroup(childrenWithOpeningPosition, 0, '')).toStrictEqual({
+		value: '<div>\n</div>',
+		children: childrenWithOpeningPosition,
+	});
+	expect(collectHTMLGroup(childrenWithClosingPosition, 0, '')).toStrictEqual({
+		value: '<div>\n</div>',
+		children: childrenWithClosingPosition,
+	});
 });
 
 test.each(['script', 'style', 'textarea', 'title'])(

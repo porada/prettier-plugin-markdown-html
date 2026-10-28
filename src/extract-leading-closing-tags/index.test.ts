@@ -25,7 +25,7 @@ test('extracts closing tags from the beginning of an HTML fragment', () => {
 	});
 });
 
-test('handles incorrect HTML', () => {
+test('extracts malformed closing tags with attributes', () => {
 	expect(
 		extractLeadingClosingTags('</div title="<p>"> <p>foo</p>')
 	).toStrictEqual({

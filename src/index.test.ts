@@ -366,13 +366,13 @@ test.each([
 		};
 
 		const output = await format(input, options);
-		const nativeOutput = await format(input, {
+		const expectedOutput = await format(input, {
 			embeddedLanguageFormatting,
 			parser: parserName,
 		});
 
 		expect(output).toBe(
-			nativeOutput
+			expectedOutput
 				.replace('id = "foo"', 'id="foo"')
 				.replace('id = "bar"', 'id="bar"')
 		);
@@ -412,9 +412,9 @@ test.each([
 		};
 
 		const output = await format(input, options);
-		const nativeOutput = await format(input, { parser: parserName });
+		const expectedOutput = await format(input, { parser: parserName });
 
-		expect(output).toBe(nativeOutput.replace('id = "foo"', 'id="foo"'));
+		expect(output).toBe(expectedOutput.replace('id = "foo"', 'id="foo"'));
 		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
@@ -441,7 +441,7 @@ test.each([
 	['crlf', 'remark', '- <div id="foo" class="bar">baz</div>\n'],
 	['crlf', 'remark', 'Before <span id="foo" class="bar">baz</span> After\n'],
 ] as const)(
-	'applies `%s` line endings once with the `%s` parser',
+	'respects `endOfLine` set to `%s` with the `%s` parser',
 	async (endOfLine, parserName, input) => {
 		const options = {
 			endOfLine,
@@ -669,9 +669,9 @@ test.each([
 		};
 
 		const output = await format(input, options);
-		const nativeOutput = await format(input, { parser: parserName });
+		const expectedOutput = await format(input, { parser: parserName });
 
-		expect(output).toBe(nativeOutput);
+		expect(output).toBe(expectedOutput);
 		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
@@ -851,9 +851,9 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		};
 
 		const output = await format(input, options);
-		const nativeOutput = await format(input, { parser: parserName });
+		const expectedOutput = await format(input, { parser: parserName });
 
-		expect(output).toBe(nativeOutput);
+		expect(output).toBe(expectedOutput);
 		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
@@ -1180,9 +1180,9 @@ test.each([
 		};
 
 		const output = await format(input, options);
-		const nativeOutput = await format(input, { parser: parserName });
+		const expectedOutput = await format(input, { parser: parserName });
 
-		expect(output).toBe(nativeOutput);
+		expect(output).toBe(expectedOutput);
 		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
@@ -1499,7 +1499,7 @@ test('supports `htmlFragmentWhitespaceSensitivity`', async () => {
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
-test('handles empty files', async () => {
+test('formats newline-only files as empty', async () => {
 	const input = '\n';
 	const options = {
 		parser: 'markdown' as const,

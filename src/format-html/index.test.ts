@@ -1,6 +1,6 @@
 import { format } from 'prettier';
 import * as pluginHTML from 'prettier/plugins/html';
-import { beforeEach, expect, test, vi } from 'vite-plus/test';
+import { expect, test, vi } from 'vite-plus/test';
 import formatHTML from './index.ts';
 
 vi.mock(import('prettier'), async (importActual) => {
@@ -10,10 +10,6 @@ vi.mock(import('prettier'), async (importActual) => {
 		...actual,
 		format: vi.fn(async (text: string) => Promise.resolve(text)),
 	};
-});
-
-beforeEach(() => {
-	vi.clearAllMocks();
 });
 
 test('formats HTML', async () => {

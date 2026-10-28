@@ -2526,7 +2526,7 @@ test.each(MARKDOWN_PARSER_NAMES)(
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'works with independently loaded plugin copies with the `%s` parser',
+	'matches a single copy’s output alongside an independently loaded copy with the `%s` parser',
 	async (parserName) => {
 		vi.resetModules();
 

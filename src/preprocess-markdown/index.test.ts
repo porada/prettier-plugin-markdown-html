@@ -1,6 +1,6 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
-import { beforeEach, expect, test, vi } from 'vite-plus/test';
+import { expect, test, vi } from 'vite-plus/test';
 import formatHTML from '../format-html/index.ts';
 import preprocessMarkdown from './index.ts';
 
@@ -10,10 +10,6 @@ vi.mock(import('../format-html/index.ts'), () => ({
 		return text;
 	}),
 }));
-
-beforeEach(() => {
-	vi.clearAllMocks();
-});
 
 test('processes root nodes only', async () => {
 	const node: AST.Node = { type: 'html', value: '<p>foo</p>' };
@@ -161,7 +157,7 @@ test('keeps an incomplete inline raw text tag unchanged', async () => {
 	]);
 });
 
-test('handles inline block HTML without source positions', async () => {
+test('preserves inline block HTML without source positions', async () => {
 	const root: AST.RootNode = {
 		type: 'root',
 		children: [
@@ -232,7 +228,7 @@ test.each<AST.Node>([
 	}
 );
 
-test('handles inline HTML without a tag name when wrapping prose', async () => {
+test('preserves inline HTML without a tag name when wrapping prose', async () => {
 	const root: AST.RootNode = {
 		type: 'root',
 		children: [

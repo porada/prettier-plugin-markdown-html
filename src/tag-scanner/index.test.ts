@@ -36,7 +36,7 @@ test('finds unclosed tags in an HTML fragment', () => {
 	expect(TagScanner.scan('<div title="<p>">foo</div>')).toStrictEqual([]);
 });
 
-test('handles deeply nested tags', () => {
+test('reports every open tag in deeply nested HTML', () => {
 	const html = '<div>'.repeat(20_000);
 
 	expect(TagScanner.scan(html)).toHaveLength(20_000);
@@ -171,7 +171,7 @@ test('removes closed tag names from the index', () => {
 	expect(internals.unclosedTags.tagIndicesByName.size).toBe(0);
 });
 
-test('handles raw text HTML tags', () => {
+test('ignores tags inside raw text HTML elements', () => {
 	expect(
 		TagScanner.scan('<script>const foo = "<div>";</script>')
 	).toStrictEqual([]);
@@ -188,7 +188,7 @@ test('handles raw text HTML tags', () => {
 	expect(TagScanner.scan('<textarea><div>')).toStrictEqual(['textarea']);
 });
 
-test('handles optional HTML end tags', () => {
+test('closes elements whose end tags are optional', () => {
 	expect(
 		TagScanner.scan(
 			'<ul><li id="foo" class="bar">baz<li id="qux" class="quux">corge</ul>'
@@ -212,7 +212,7 @@ test('handles optional HTML end tags', () => {
 	).toStrictEqual([]);
 });
 
-test('handles incorrect HTML', () => {
+test('reports open tags left by malformed HTML', () => {
 	expect(TagScanner.scan('</img>')).toStrictEqual([]);
 	expect(TagScanner.scan('<p></div>')).toStrictEqual(['p']);
 	expect(TagScanner.scan('<div><span></div>')).toStrictEqual(['div', 'span']);
