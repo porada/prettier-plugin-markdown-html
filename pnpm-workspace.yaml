@@ -4,8 +4,6 @@ autoInstallPeers: false
 
 color: always
 
-engineStrict: true
-
 gitChecks: false
 
 lockfile:
@@ -20,7 +18,7 @@ overrides:
   vite-plus>oxfmt: '-'
   vite-plus>oxlint: latest
   vite-plus>oxlint-tsgolint: latest
-  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.6.0
 
 peerDependencyRules:
   allowAny:
