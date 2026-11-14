@@ -7,8 +7,8 @@ import {
 	callParserWithCompatibility,
 	createPriorParserResolver,
 	createPriorPrinterResolver,
-	markParserAsMarkdownHTML,
-	markPrinterAsMarkdownHTML,
+	markParserAsOwn,
+	markPrinterAsOwn,
 	withPriorParserOptions,
 	withPriorPrinterOptions,
 } from './plugin-hooks/index.ts';
@@ -88,7 +88,7 @@ function createParser(name: ParserName): Parser {
 	);
 	priorParserResolverByName.set(name, resolvePriorParser);
 
-	return markParserAsMarkdownHTML(parser);
+	return markParserAsOwn(parser);
 }
 
 export const parsers: Plugin['parsers'] = {
@@ -176,7 +176,7 @@ const resolvePriorPrinter = createPriorPrinterResolver(
 );
 
 export const printers: Plugin['printers'] = {
-	mdast: markPrinterAsMarkdownHTML(mdastPrinter),
+	mdast: markPrinterAsOwn(mdastPrinter),
 };
 
 export const options: Plugin['options'] = {

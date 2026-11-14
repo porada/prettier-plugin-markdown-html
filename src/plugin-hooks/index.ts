@@ -45,17 +45,17 @@ const NO_PRINTER_PREPROCESS = Symbol('no-printer-preprocess');
 const PARSER_DELEGATION = Symbol.for(
 	'prettier-plugin-markdown-html.parser-delegation'
 );
-const PARSER_HOOKS = Symbol.for('prettier-plugin-markdown-html.parser-hooks');
 const PARSER_MARKER = Symbol.for('prettier-plugin-markdown-html.parser');
+const PARSER_ORIGIN = Symbol.for('prettier-plugin-markdown-html.parser-origin');
 const PRINTER_MARKER = Symbol.for('prettier-plugin-markdown-html.printer');
 
 /**
  * Marks a parser so resolver chains can recognize this plugin’s wrappers.
  */
-export function markParserAsMarkdownHTML(parser: Parser): Parser {
+export function markParserAsOwn(parser: Parser): Parser {
 	Object.defineProperty(parser, PARSER_MARKER, { value: true });
 	// Copies retain hook identities without marking their overrides as canonical
-	Object.defineProperty(parser, PARSER_HOOKS, {
+	Object.defineProperty(parser, PARSER_ORIGIN, {
 		enumerable: true,
 		value: { parse: parser.parse, preprocess: parser.preprocess },
 	});
@@ -66,14 +66,14 @@ export function markParserAsMarkdownHTML(parser: Parser): Parser {
  * Checks whether a parser carries this plugin’s marker directly
  * or through inheritance.
  */
-function isMarkdownHTMLParser(parser: Parser): boolean {
+function isOwnParser(parser: Parser): boolean {
 	return Reflect.get(parser, PARSER_MARKER) === true;
 }
 
 /**
  * Marks a printer so resolver chains can recognize this plugin’s wrappers.
  */
-export function markPrinterAsMarkdownHTML(printer: Printer): Printer {
+export function markPrinterAsOwn(printer: Printer): Printer {
 	Object.defineProperty(printer, PRINTER_MARKER, { value: true });
 	return printer;
 }
@@ -81,7 +81,7 @@ export function markPrinterAsMarkdownHTML(printer: Printer): Printer {
 /**
  * Checks whether a printer directly carries this plugin’s marker.
  */
-function isMarkdownHTMLPrinter(printer: Printer): boolean {
+function isOwnPrinter(printer: Printer): boolean {
 	return (
 		Object.getOwnPropertyDescriptor(printer, PRINTER_MARKER)?.value === true
 	);
@@ -218,7 +218,7 @@ async function findPriorParser(
 		const isEntryParser = isFirstParser;
 		isFirstParser = false;
 
-		if (isMarkdownHTMLParser(parser)) {
+		if (isOwnParser(parser)) {
 			omittedPluginIndexes.add(index);
 			continue;
 		}
@@ -227,7 +227,7 @@ async function findPriorParser(
 
 		parserPlugin ??= plugin;
 
-		const copiedHooks = Reflect.get(parser, PARSER_HOOKS) as
+		const origin = Reflect.get(parser, PARSER_ORIGIN) as
 			Pick<Parser, ParserHookName> | undefined;
 		const parserHook = parser[hook];
 
@@ -235,7 +235,7 @@ async function findPriorParser(
 		// This assumes the plugin list has not changed before first entry
 		if (
 			parserHook === currentParser[hook] ||
-			(copiedHooks && (isEntryParser || parserHook === copiedHooks[hook]))
+			(origin && (isEntryParser || parserHook === origin[hook]))
 		) {
 			omittedPluginIndexes.add(index);
 			continue;
@@ -507,7 +507,7 @@ async function resolvePriorPrinterCandidate(
 
 	return typeof printer.preprocess === 'function' &&
 		(printer.print === currentPrinter.print ||
-			(isMarkdownHTMLPrinter(currentPrinter) &&
+			(isOwnPrinter(currentPrinter) &&
 				printer.print === markdownPrinters.mdast.print)) &&
 		printer.getVisitorKeys === currentPrinter.getVisitorKeys
 		? printer
@@ -519,7 +519,7 @@ async function resolvePriorPrinterCandidate(
  */
 function isCurrentPrinter(printer: Printer, currentPrinter: Printer): boolean {
 	return (
-		isMarkdownHTMLPrinter(printer) ||
+		isOwnPrinter(printer) ||
 		printer.preprocess === currentPrinter.preprocess
 	);
 }
