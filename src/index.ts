@@ -183,13 +183,13 @@ export const options: Plugin['options'] = {
 	...htmlOptions,
 	...markdownOptions,
 	htmlFragmentBracketSameLine: {
-		category: 'Output',
+		category: 'Markdown HTML',
 		description:
 			'Keep the closing bracket on the last attribute line in block-level raw HTML fragments in Markdown.',
 		type: 'boolean',
 	},
 	htmlFragmentEmbeddedLanguageFormatting: {
-		category: 'Output',
+		category: 'Markdown HTML',
 		description:
 			'Control formatting of `<script>` and `<style>` contents in raw HTML fragments in Markdown.',
 		type: 'choice',
@@ -205,19 +205,19 @@ export const options: Plugin['options'] = {
 		],
 	},
 	htmlFragmentPrintWidth: {
-		category: 'Output',
+		category: 'Markdown HTML',
 		description:
 			'Override the preferred line length for raw HTML fragments in Markdown.',
 		type: 'int',
 	},
 	htmlFragmentSingleAttributePerLine: {
-		category: 'Output',
+		category: 'Markdown HTML',
 		description:
 			'Enforce one HTML attribute per line for raw HTML fragments in Markdown.',
 		type: 'boolean',
 	},
 	htmlFragmentWhitespaceSensitivity: {
-		category: 'Output',
+		category: 'Markdown HTML',
 		description:
 			'Control whitespace handling for raw HTML fragments in Markdown.',
 		type: 'choice',
