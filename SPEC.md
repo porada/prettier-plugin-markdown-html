@@ -24,37 +24,13 @@ The plugin supports Prettier’s `markdown` and `remark` parsers. It formats raw
 
 Inline code, fenced code, indented code, and escaped text are outside raw HTML formatting and validation. Prettier remains responsible for Markdown and supported fenced languages. A sequence that resembles a tag stays ordinary text when GFM interprets it that way.
 
-This distinction also applies when Prettier recognizes an additional syntax. In the example below, the reference profile treats the apparent footnote definition as an ordinary link reference definition. The indented markup remains literal code, including the spaces around its attribute’s `=`.
+In the example below, the inline `span` and the HTML inside the block quote are formatted. The code span keeps its literal markup, including the spaces around `=`.
 
 <!-- eslint-disable markdown/heading-increment -->
 
 ###### Markdown
 
 <!-- eslint-enable markdown/heading-increment -->
-
-<!-- prettier-ignore -->
-```md
-[^foo]: bar
-
-    <div title = "baz">qux</div>
-```
-
-###### Rendered HTML
-
-```html
-<pre><code>&lt;div title = &quot;baz&quot;&gt;qux&lt;/div&gt;
-</code></pre>
-```
-
-HTML tokens in image descriptions become literal alternative text in the reference renderer. Their spelling and spacing survive Markdown formatting. They neither undergo HTML formatting and validation nor establish HTML context for surrounding content.
-
-The next example shows inline HTML, an HTML block inside a block quote, and a code span containing literal markup.
-
-<!-- eslint-disable markdown/no-duplicate-headings -->
-
-###### Markdown
-
-<!-- eslint-enable markdown/no-duplicate-headings -->
 
 <!-- prettier-ignore -->
 ```md
@@ -67,11 +43,7 @@ foo <span title="bar">**baz**</span>
 `<span title = "corge">grault</span>`
 ```
 
-<!-- eslint-disable markdown/no-duplicate-headings -->
-
 ###### Rendered HTML
-
-<!-- eslint-enable markdown/no-duplicate-headings -->
 
 ```html
 <p>
@@ -85,11 +57,15 @@ foo <span title="bar">**baz**</span>
 <p><code>&lt;span title = &quot;corge&quot;&gt;grault&lt;/span&gt;</code></p>
 ```
 
+HTML tokens in image descriptions become literal alternative text in the reference renderer. Their spelling and spacing survive Markdown formatting. They neither undergo HTML formatting and validation nor establish HTML context for surrounding content.
+
 ### Supported Syntax
 
 Prettier’s HTML parser determines accepted syntax, including custom elements and foreign content such as SVG. The plugin adds no separate conformance checks for attributes, permitted children, or document wrappers.
 
 MDX, JSX, and template syntax receive their ordinary interpretation under GFM and Prettier’s HTML parser. They introduce no additional dialect or execution semantics. A construct that both parsers accept follows this specification even if it resembles another language. The plugin doesn’t infer that language or rewrite literal text to accommodate it. YAML front matter, for example, keeps its GFM interpretation. If Prettier’s front matter formatting would change that interpretation or significant content, formatting reports an error.
+
+Prettier’s Markdown parser recognizes `[^foo]: bar` as a footnote definition and treats the following indented markup as its content. The reference profile disables footnotes and interprets that line as an ordinary link reference definition. At the document root, markup indented by four spaces after the definition and a blank line therefore forms a separate code block and keeps its attribute spacing.
 
 Other Prettier plugins can format unrelated languages. A replacement for the Markdown or HTML parser or printer is compatible only when it preserves this specification’s interpretation and guarantees. Detected incompatibilities, such as an unsupported Markdown syntax tree, produce an error instead of silently skipping raw HTML formatting. Arbitrary third-party replacements have no compatibility guarantee.
 
