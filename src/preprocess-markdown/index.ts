@@ -12,6 +12,13 @@ type RawTextState = {
 	tagName: string | undefined;
 };
 
+const HTML_ATTRIBUTE_PATTERN = String.raw`[\t ]+[a-z_:][\w.:-]*(?:[\t ]*=[\t ]*(?:[^\t "'<=>\x60]+|'[^']*'|"[^"]*"))?`;
+
+const HTML_TAG_LINE_PATTERN = new RegExp(
+	String.raw`^(?:<[a-z][a-z0-9-]*(?:${HTML_ATTRIBUTE_PATTERN})*[\t ]*\/?>|<\/[a-z][a-z0-9-]*[\t ]*>)[\t ]*$`,
+	'i'
+);
+
 export const formattedHTMLNodes = new WeakSet<AST.Node>();
 
 export default async function preprocessMarkdown(
@@ -43,6 +50,9 @@ async function formatHTMLInParent(
 	);
 }
 
+/**
+ * Formats HTML nodes among siblings and recurses into siblings with children.
+ */
 async function formatHTMLChildren(
 	children: AST.Node[],
 	options: ParserOptions,
@@ -108,6 +118,14 @@ async function formatHTMLChildren(
 				/^<!--\s*prettier-ignore\s*-->$/.test(previousNode.value)) ||
 			/^<!--\s*prettier-ignore\s*-->/.test(group.value);
 
+		// CommonMark starts an HTML block with a non-block tag only when
+		// the complete tag fills its first line. Retry without wrapping
+		// before keeping the source unchanged
+		const tagLineFallbackOptions =
+			mode === 'block' && startsWithNonBlockTag(group.value)
+				? getFormattingOptions(options, 'compact')
+				: undefined;
+
 		// Keep ignored nodes and incomplete block raw text intact. Coalescing
 		// ignored nodes would discard source spans used by Markdown’s printer
 		const groupNodes =
@@ -116,7 +134,8 @@ async function formatHTMLChildren(
 				: await formatHTMLGroup(
 						group,
 						formattingOptions,
-						rawText.tagName
+						rawText.tagName,
+						tagLineFallbackOptions
 					);
 
 		nodes.push(...groupNodes);
@@ -176,10 +195,15 @@ function getFormattingOptions(
 	};
 }
 
+/**
+ * Formats adjacent HTML nodes as a single fragment, keeping the source nodes
+ * when the result can’t replace them safely.
+ */
 async function formatHTMLGroup(
 	group: AST.HTMLGroup,
 	options: ParserOptions,
-	rawTextTag?: string
+	rawTextTag?: string,
+	tagLineFallbackOptions?: ParserOptions
 ): Promise<AST.Node[]> {
 	const node = group.children[0]!;
 
@@ -195,19 +219,33 @@ async function formatHTMLGroup(
 	// tags as separate nodes
 	const parseableHTML = rawTextTag ? `${html}</${rawTextTag}>` : html;
 	const unclosedTags = TagScanner.scan(html);
-	const formattedHTML = stripTrailingClosingTags(
-		await formatHTML(parseableHTML, options),
-		unclosedTags
-	);
+	const formattingAttempts = tagLineFallbackOptions
+		? [options, tagLineFallbackOptions]
+		: [options];
 
-	if (!formattedHTML) {
-		return group.children;
+	for (const formattingOptions of formattingAttempts) {
+		const formattedHTML = stripTrailingClosingTags(
+			await formatHTML(parseableHTML, formattingOptions),
+			unclosedTags
+		);
+
+		if (!formattedHTML) {
+			return group.children;
+		}
+
+		const value = closingTags + formattedHTML;
+
+		if (tagLineFallbackOptions && !startsWithTagLine(value)) {
+			continue;
+		}
+
+		node.value = value;
+		formattedHTMLNodes.add(node);
+
+		return [node];
 	}
 
-	node.value = closingTags + formattedHTML;
-	formattedHTMLNodes.add(node);
-
-	return [node];
+	return group.children;
 }
 
 function getUnclosedRawTextTag(html: string): string | undefined {
@@ -248,9 +286,36 @@ function preventMarkdownBlockTagLineStart(
 	}
 }
 
+/**
+ * Checks whether HTML begins with a tag that can interrupt a
+ * Markdown paragraph.
+ */
 function isMarkdownBlockTag(html: string): boolean {
-	const tagName = /^<\/?([a-z][a-z0-9-]*)(?=[\t\n\f\r />])/i.exec(html)?.[1];
+	const tagName = getLeadingTagName(html);
 	return tagName ? isBlockTag(tagName) : false;
+}
+
+/**
+ * Checks whether HTML begins with a tag that starts an HTML block only when the
+ * complete tag fills its first line.
+ */
+function startsWithNonBlockTag(html: string): boolean {
+	const tagName = getLeadingTagName(html);
+	return tagName ? !isBlockTag(tagName) : false;
+}
+
+/**
+ * Checks whether the first line contains only a complete tag.
+ */
+function startsWithTagLine(html: string): boolean {
+	return HTML_TAG_LINE_PATTERN.test(html.split('\n', 1)[0]!);
+}
+
+/**
+ * Returns the name of the tag at the start of the HTML.
+ */
+function getLeadingTagName(html: string): string | undefined {
+	return /^<\/?([a-z][a-z0-9-]*)(?=[\t\n\f\r />])/i.exec(html)?.[1];
 }
 
 function getLastDescendant(node: AST.Node): AST.Node {

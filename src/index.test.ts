@@ -635,6 +635,58 @@ test('keeps inline HTML compact in headings and table cells', async () => {
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
+test.each([
+	{
+		input: '<img id="foo" src="bar.png">\n',
+		output: '<img id="foo" src="bar.png" />\n',
+	},
+	{
+		input: '<a href="foo">\n<img id="bar" src="baz.png">\n</a>\n',
+		output: `<a href="foo">
+  <img
+    id="bar"
+    src="baz.png"
+  />
+</a>
+`,
+	},
+	{
+		input: '</a>\n<img id="foo" src="bar.png">\n',
+		output: `</a>
+<img
+  id="foo"
+  src="bar.png"
+/>
+`,
+	},
+])(
+	'formats HTML blocks that start with non-block tags without splitting their first line',
+	async ({ input, output: expectedOutput }) => {
+		const options = {
+			parser: 'markdown' as const,
+			plugins: [pluginMarkdownHTML],
+			printWidth: 20,
+		};
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	}
+);
+
+test('preserves HTML blocks that start with non-block tags when formatting would turn them into paragraphs', async () => {
+	const input = '<span id="foo" class="bar">\nbaz\n</span>\n';
+
+	const output = await format(input, {
+		parser: 'markdown',
+		plugins: [pluginMarkdownHTML],
+		printWidth: 20,
+	});
+
+	expect(output).toBe(input);
+});
+
 test('preserves blank lines between nested HTML blocks', async () => {
 	const input = `> <div id="foo">bar</div>
 >
