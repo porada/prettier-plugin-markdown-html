@@ -15,6 +15,9 @@ const HTML_VOID_TAG_NAMES = new Set([
 	'wbr',
 ]);
 
+/**
+ * Checks whether an element has no contents or closing tag.
+ */
 export default function isVoidTag(tagName: string): boolean {
 	return HTML_VOID_TAG_NAMES.has(tagName.toLowerCase());
 }

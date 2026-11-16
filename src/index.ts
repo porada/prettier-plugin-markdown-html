@@ -25,6 +25,10 @@ const priorParserResolverByName = new Map<
 	ReturnType<typeof createPriorParserResolver>
 >();
 
+/**
+ * Creates a parser that defers to the prior compatible parser before Prettier’s
+ * native parser.
+ */
 function createParser(name: ParserName): Parser {
 	const nativeParser = markdownParsers[name];
 

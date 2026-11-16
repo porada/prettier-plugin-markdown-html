@@ -70,6 +70,10 @@ const HTML_BLOCK_TAG_NAMES = new Set([
 	'ul',
 ]);
 
+/**
+ * Checks whether a tag can interrupt a paragraph with an HTML block in
+ * CommonMark or Prettier’s Markdown parser.
+ */
 export default function isBlockTag(tagName: string): boolean {
 	return HTML_BLOCK_TAG_NAMES.has(tagName.toLowerCase());
 }

@@ -1,3 +1,7 @@
+/**
+ * Removes the closing tags that Prettier adds to elements left open in the
+ * fragment. Returns `undefined` when they don’t end the formatted HTML.
+ */
 export default function stripTrailingClosingTags(
 	html: string,
 	tagNames: string[]

@@ -21,6 +21,9 @@ const HTML_TAG_LINE_PATTERN = new RegExp(
 
 export const formattedHTMLNodes = new WeakSet<AST.Node>();
 
+/**
+ * Formats raw HTML throughout a Markdown syntax tree.
+ */
 export default async function preprocessMarkdown(
 	root: AST.Node,
 	options: ParserOptions
@@ -34,6 +37,9 @@ export default async function preprocessMarkdown(
 	return root;
 }
 
+/**
+ * Formats raw HTML among a parent’s children in the mode the parent allows.
+ */
 async function formatHTMLInParent(
 	parent: AST.ParentNode,
 	options: ParserOptions,
@@ -145,6 +151,10 @@ async function formatHTMLChildren(
 	return nodes;
 }
 
+/**
+ * Selects how HTML may wrap inside a parent without breaking its
+ * Markdown context.
+ */
 function getChildFormatMode(
 	parent: AST.ParentNode,
 	inheritedMode: AST.HTMLFormatMode
@@ -164,6 +174,9 @@ function getChildFormatMode(
 	return 'block';
 }
 
+/**
+ * Adjusts formatting options to keep HTML valid in its Markdown context.
+ */
 function getFormattingOptions(
 	options: ParserOptions,
 	mode: AST.HTMLFormatMode
@@ -248,12 +261,19 @@ async function formatHTMLGroup(
 	return group.children;
 }
 
+/**
+ * Finds a raw text element left open at the end of the HTML.
+ */
 function getUnclosedRawTextTag(html: string): string | undefined {
 	const tagName = TagScanner.scan(html).at(-1);
 
 	return tagName && isRawTextTag(tagName) ? tagName : undefined;
 }
 
+/**
+ * Keeps an inline block tag from wrapping to the start of a line, where
+ * Markdown would start an HTML block.
+ */
 function preventMarkdownBlockTagLineStart(
 	formattedNodes: AST.Node[],
 	htmlNode: AST.HTMLNode,
@@ -318,6 +338,9 @@ function getLeadingTagName(html: string): string | undefined {
 	return /^<\/?([a-z][a-z0-9-]*)(?=[\t\n\f\r />])/i.exec(html)?.[1];
 }
 
+/**
+ * Returns a node’s deepest last descendant.
+ */
 function getLastDescendant(node: AST.Node): AST.Node {
 	let descendant = node;
 
@@ -328,14 +351,23 @@ function getLastDescendant(node: AST.Node): AST.Node {
 	return descendant;
 }
 
+/**
+ * Recognizes HTML nodes with source text that can be formatted.
+ */
 function isHTMLNode(node: AST.Node | undefined): node is AST.HTMLNode {
 	return node?.type === 'html' && typeof node.value === 'string';
 }
 
+/**
+ * Recognizes nodes with children.
+ */
 function isParentNode(node: AST.Node | undefined): node is AST.ParentNode {
 	return Array.isArray(node?.children);
 }
 
+/**
+ * Recognizes Markdown root nodes.
+ */
 function isRootNode(node: AST.Node | undefined): node is AST.RootNode {
 	return node?.type === 'root' && Array.isArray(node.children);
 }

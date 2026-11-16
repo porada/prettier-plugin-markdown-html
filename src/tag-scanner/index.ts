@@ -115,6 +115,10 @@ type PendingMarkupResult = {
 };
 
 export default class TagScanner {
+	/**
+	 * Returns the names of elements an HTML fragment leaves open, from
+	 * outermost to innermost.
+	 */
 	static scan(html: string): string[] {
 		const scanner = new TagScanner();
 
@@ -134,10 +138,18 @@ export default class TagScanner {
 		tagNames: [],
 	};
 
+	/**
+	 * Scans the next chunk of HTML, carrying incomplete markup into the
+	 * following chunk.
+	 */
 	consume(html: string): void {
 		this.consumeHTML(html, true);
 	}
 
+	/**
+	 * Scans HTML for tags, optionally keeping incomplete markup for the
+	 * next chunk.
+	 */
 	private consumeHTML(html: string, preserveIncompleteMarkup: boolean): void {
 		const source = this.pendingHTML + html;
 		this.pendingHTML = '';
@@ -293,6 +305,10 @@ export default class TagScanner {
 		}
 	}
 
+	/**
+	 * Applies a tag to the open elements and reports whether raw text
+	 * follows it.
+	 */
 	private processTag(token: string, tagName: string): boolean {
 		if (token.startsWith('</')) {
 			if (!isVoidTag(tagName)) {
@@ -311,10 +327,16 @@ export default class TagScanner {
 		return isRawTextTag(tagName);
 	}
 
+	/**
+	 * Returns the names of open elements, from outermost to innermost.
+	 */
 	getUnclosedTags(): string[] {
 		return [...this.unclosedTags.tagNames];
 	}
 
+	/**
+	 * Checks whether any element or incomplete tag remains open.
+	 */
 	hasUnclosedTags(): boolean {
 		return (
 			this.pendingMarkup !== undefined ||
@@ -323,6 +345,10 @@ export default class TagScanner {
 	}
 }
 
+/**
+ * Starts tracking markup that may continue in the next chunk, unless it’s
+ * already invalid.
+ */
 function createPendingMarkup(markup: string): PendingMarkup | undefined {
 	const pendingMarkup: PendingMarkup = {
 		chunks: [markup],
@@ -335,6 +361,9 @@ function createPendingMarkup(markup: string): PendingMarkup | undefined {
 	return result.type === 'incomplete' ? pendingMarkup : undefined;
 }
 
+/**
+ * Advances incomplete markup until it becomes a tag, a comment, or invalid.
+ */
 function advancePendingMarkup(
 	pendingMarkup: PendingMarkup,
 	html: string,
@@ -417,6 +446,9 @@ function advancePendingMarkup(
 	return { type: 'incomplete' };
 }
 
+/**
+ * Finds a trailing part of `-->` that the next chunk may complete.
+ */
 function findTrailingCommentEndPrefix(
 	html: string,
 	startIndex: number
@@ -432,6 +464,9 @@ function findTrailingCommentEndPrefix(
 	return '';
 }
 
+/**
+ * Finds a trailing part of a closing tag that the next chunk may complete.
+ */
 function findTrailingClosingTagPrefix(
 	html: string,
 	tagName: string,
@@ -458,6 +493,9 @@ function findTrailingClosingTagPrefix(
 	return /^\s+$/.test(suffix.slice(closingTag.length)) ? closingTag : '';
 }
 
+/**
+ * Opens an element and records whether its end tag can be omitted.
+ */
 function pushUnclosedTag(
 	unclosedTags: UnclosedTagStack,
 	tagName: string
@@ -481,6 +519,9 @@ function pushUnclosedTag(
 	}
 }
 
+/**
+ * Closes open elements that a start tag implicitly ends.
+ */
 function closeOptionalEndTagsBeforeStartTag(
 	unclosedTags: UnclosedTagStack,
 	tagName: string
@@ -499,6 +540,9 @@ function closeOptionalEndTagsBeforeStartTag(
 	}
 }
 
+/**
+ * Finds the innermost open element that a start tag implicitly ends.
+ */
 function findLastOptionalEndTagIndex(
 	unclosedTags: UnclosedTagStack,
 	tagName: string
@@ -517,6 +561,9 @@ function findLastOptionalEndTagIndex(
 	return lastIndex;
 }
 
+/**
+ * Closes an element when every open descendant can end implicitly.
+ */
 function closeTag(unclosedTags: UnclosedTagStack, tagName: string): void {
 	const openTagIndex =
 		unclosedTags.tagIndicesByName.get(tagName)?.at(-1) ?? -1;
@@ -529,6 +576,9 @@ function closeTag(unclosedTags: UnclosedTagStack, tagName: string): void {
 	}
 }
 
+/**
+ * Checks whether every element open inside a parent can end implicitly.
+ */
 function canOmitDescendantEndTags(
 	unclosedTags: UnclosedTagStack,
 	parentIndex: number
@@ -536,6 +586,9 @@ function canOmitDescendantEndTags(
 	return (unclosedTags.nonOmittableTagIndices.at(-1) ?? -1) <= parentIndex;
 }
 
+/**
+ * Closes open elements until only the given number remain.
+ */
 function truncateUnclosedTags(
 	unclosedTags: UnclosedTagStack,
 	length: number
@@ -557,6 +610,9 @@ function truncateUnclosedTags(
 	}
 }
 
+/**
+ * Checks whether an element ends implicitly when its parent closes.
+ */
 function canOmitEndTagAtParentEnd(
 	tagName: string,
 	parentTagName: string
@@ -571,6 +627,10 @@ function canOmitEndTagAtParentEnd(
 	return HTML_OPTIONAL_END_TAGS_AT_PARENT_END.has(tagName);
 }
 
+/**
+ * Finds where the next closing tag for an element ends. Returns `-1` when the
+ * HTML has none.
+ */
 function findClosingTagEndIndex(
 	html: string,
 	tagName: string,

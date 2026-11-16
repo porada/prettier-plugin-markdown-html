@@ -1,3 +1,7 @@
+/**
+ * Separates closing tags at the start of a fragment, which close elements
+ * opened in earlier Markdown nodes.
+ */
 export default function extractLeadingClosingTags(html: string): {
 	closingTags: string;
 	html: string;

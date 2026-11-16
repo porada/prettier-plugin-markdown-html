@@ -2,6 +2,10 @@ import type { Options, ParserOptions } from 'prettier';
 import { format } from 'prettier';
 import * as pluginHTML from 'prettier/plugins/html';
 
+/**
+ * Formats an HTML fragment, letting the plugin’s fragment options override
+ * Prettier’s matching options.
+ */
 export default async function formatHTML(
 	text: string,
 	options?: Options | ParserOptions
@@ -47,6 +51,10 @@ export default async function formatHTML(
 	}
 }
 
+/**
+ * Removes Markdown parser state that a nested HTML format call must
+ * not inherit.
+ */
 function omitParserOptions(
 	options: Options | ParserOptions | undefined
 ): Options {
@@ -78,6 +86,10 @@ function omitParserOptions(
 	return formattingOptions;
 }
 
+/**
+ * Throws an error that names the plugin and any supplied file, keeping the
+ * original error as its cause.
+ */
 function reportFormattingError(
 	filepath: string | undefined,
 	error: unknown
