@@ -58,16 +58,7 @@ describe('Formatting Scope', () => {
 	});
 });
 
-describe('Supported Syntax', () => {
-	test('keeps indented markup after apparent footnote definitions as literal code', async () => {
-		const input = `[^foo]: bar
-
-    <div title = "baz">qux</div>
-`;
-
-		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
-	});
-
+describe('Parser Disagreement', () => {
 	test('rejects raw HTML that only the reference renderer reads in math', async () => {
 		await expect(format('$$\n<span>\n$$\n', SPEC_EXAMPLE_OPTIONS)).rejects
 			.toThrowErrorMatchingInlineSnapshot(`
@@ -97,18 +88,6 @@ describe('Supported Syntax', () => {
 		`);
 	});
 
-	test('formats raw HTML in apparent footnote definitions that read as paragraphs', async () => {
-		const input = '<div></div>\n\n[^foo]: bar <b   >baz</b>\n';
-		const expectedOutput = '<div></div>\n\n[^foo]: bar <b>baz</b>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
-			output
-		);
-	});
-
 	test('follows Prettier’s formatting of frontmatter', async () => {
 		const input = "---\ntitle: 'foo'\n---\n\nbar\n";
 
@@ -131,12 +110,81 @@ describe('Supported Syntax', () => {
 		);
 	});
 
+	test('rejects raw HTML that only the reference renderer reads in inline math', async () => {
+		await expect(format('foo $$<b>bar</b>$$ baz\n', SPEC_EXAMPLE_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown recognizes raw HTML within it]
+		`);
+	});
+
+	test('formats raw HTML between single dollar signs as inline HTML', async () => {
+		const input = 'foo $<b   >bar</b>$ baz\n';
+		const expectedOutput = 'foo $<b>bar</b>$ baz\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML that only the reference renderer reads in Liquid tags', async () => {
+		await expect(format('{% <b>foo</b> %}\n', SPEC_EXAMPLE_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as a Liquid tag, but GitHub Flavored Markdown recognizes raw HTML within it]
+		`);
+	});
+
+	test('rejects raw HTML that only the reference renderer reads in wiki links', async () => {
+		await expect(format('[[<b>foo</b>]]\n', SPEC_EXAMPLE_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as a wiki link, but GitHub Flavored Markdown recognizes raw HTML within it]
+		`);
+	});
+
+	test('keeps indented markup after apparent footnote definitions as literal code', async () => {
+		const input = `[^foo]: bar
+
+    <div title = "baz">qux</div>
+`;
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('formats raw HTML in apparent footnote definitions that read as paragraphs', async () => {
+		const input = '<div></div>\n\n[^foo]: bar <b   >baz</b>\n';
+		const expectedOutput = '<div></div>\n\n[^foo]: bar <b>baz</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
 	test('rejects raw HTML that ends a paragraph in an apparent footnote definition', async () => {
 		await expect(format('[^foo]: bar </p><p>baz\n', SPEC_EXAMPLE_OPTIONS))
 			.rejects.toThrowErrorMatchingInlineSnapshot(`
 			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (1:1):
 
 			A closing tag in raw HTML ends this paragraph before its Markdown content ends]
+		`);
+	});
+
+	test('rejects HTML blocks that only the reference renderer starts in apparent footnote definitions', async () => {
+		await expect(format('[^foo]: bar\n<source>\n', SPEC_EXAMPLE_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as a footnote definition, but GitHub Flavored Markdown recognizes raw HTML within it]
 		`);
 	});
 
@@ -268,6 +316,636 @@ describe('Supported Syntax', () => {
 			'[^foo]: bar\n\n    - [ ] baz\n\n      <div>\n      <p>qux</p>\n      </div>\n';
 
 		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('leaves inline declarations that GFM reads as text to Prettier', async () => {
+		const input = 'foo <!DOCTYPE> bar\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(
+			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
+		);
+	});
+
+	test('leaves inline declarations with whitespace that GFM doesn’t accept to Prettier', async () => {
+		const input = 'foo <!DOCTYPE\u00A0HTML> bar\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(
+			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
+		);
+	});
+
+	test('rejects inline declarations that GFM reads as text around raw HTML', async () => {
+		await expect(
+			format(
+				'foo <!doctype <pre>\n\nbar    <b   >baz</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			Prettier’s Markdown parser reads this as a declaration, but GitHub Flavored Markdown reads it as text with raw HTML inside]
+		`);
+	});
+
+	test('leaves declarations that only Prettier reads as HTML blocks to Prettier', async () => {
+		const input = '<div   ></div>\n\n<!doctype   html>\n';
+		const expectedOutput = '<div></div>\n\n<!doctype   html>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('leaves text that only Prettier reads as HTML in paragraphs without raw HTML to Prettier', async () => {
+		const input = 'foo\n<!doctype html>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(
+			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
+		);
+	});
+
+	test('leaves text on several lines that only Prettier reads as HTML to Prettier', async () => {
+		const input = '<!doctype\nhtml>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(
+			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
+		);
+	});
+
+	test('rejects HTML blocks that only Prettier reads around raw HTML', async () => {
+		await expect(
+			format('<!doctype html> <b>foo</b>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML when GFM continues its paragraph', async () => {
+		await expect(
+			format('<!doctype html>\n<b   >foo</b>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML when GFM continues a paragraph into it', async () => {
+		await expect(
+			format('- <b>foo</b>\n<!doctype html>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML before lines that start HTML blocks', async () => {
+		await expect(
+			format(
+				'<!doctype\n<pre "x"\n>\n\nfoo    <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML before lines that start Markdown blocks', async () => {
+		await expect(
+			format('<!doctype\n```\n>\n\n<b   >x</b>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML before lazy continuation lines', async () => {
+		await expect(
+			format('- <!doctype html>\nfoo <b   >x</b>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML before lines with only nonbreaking spaces', async () => {
+		await expect(
+			format(
+				'- <!doctype html>\n\u00A0\nfoo <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML before lines with only form feeds', async () => {
+		await expect(
+			format(
+				'- <!doctype html>\n\f\nfoo <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML before indented quote markers', async () => {
+		await expect(
+			format(
+				'<!doctype html>\n    >\n<b   >x</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('leaves text that only Prettier reads as HTML before quote markers in list items to Prettier', async () => {
+		const input = '- <!doctype html>\n    >\n    <b   >x</b>\n';
+		const expectedOutput = '- <!doctype html>\n    >\n    <b>x</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('leaves text that only Prettier reads as HTML before quote markers in lists in block quotes to Prettier', async () => {
+		const input = '> - <!doctype html>\n>   >\n>   <b   >x</b>\n';
+		const expectedOutput = '> - <!doctype html>\n>     >\n>     <b>x</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('leaves text that only Prettier reads as HTML before empty quote markers in nested block quotes to Prettier', async () => {
+		const input = '> > <!doctype html>\n>\n> <b>x</b>\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('leaves text that only Prettier reads as HTML before unindented quote markers in list items to Prettier', async () => {
+		const input = '- <!doctype html>\n>\n<b   >x</b>\n';
+		const expectedOutput = '- <!doctype html>\n\n>\n\n<b>x</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('leaves text that only Prettier reads as HTML before underindented quote markers in list items to Prettier', async () => {
+		const input = '123. <!doctype html>\n   >\n<b   >x</b>\n';
+		const expectedOutput = '123. <!doctype html>\n\n>\n\n<b>x</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('leaves text that only Prettier reads as HTML before padded blank lines in lists in block quotes to Prettier', async () => {
+		const input = '> - <!doctype html>\n>   \n>   <b   >x</b>\n';
+		const expectedOutput = '> - <!doctype html>\n>\n>     <b>x</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects text that only Prettier reads as HTML before quote markers that continue lazily', async () => {
+		await expect(
+			format(
+				'> <!doctype html>\n    >\n> <b   >x</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML before quote markers that continue lazily in lists', async () => {
+		await expect(
+			format(
+				'> - <!doctype html>\n     >\n>   <b   >x</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML before quote markers with too little list indentation', async () => {
+		await expect(
+			format(
+				'123. <!doctype html>\n    >\n<b   >x</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:6):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML inside raw HTML elements', async () => {
+		await expect(
+			format(
+				'<div>\n\n<!doctype html>\nfoo\n\n</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (3:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML inside comments', async () => {
+		await expect(
+			format(
+				'<div></div>\n<!-- c\n\n<!doctype html>\nfoo\n\n<div>-->\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (4:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('leaves text that only Prettier reads as HTML between blank lines inside raw HTML elements to Prettier', async () => {
+		const input = '<div>\n\n<!doctype html>\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(
+			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
+		);
+	});
+
+	test('rejects text that only Prettier reads as HTML next to tags on several lines', async () => {
+		await expect(
+			format(
+				'<!doctype html>\nfoo <img\nsrc="x">\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML beside HTML-like text in code spans', async () => {
+		await expect(
+			format(
+				'<!doctype html>\n`<span>foo</span>`\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects HTML blocks that only Prettier lets interrupt a paragraph', async () => {
+		await expect(
+			format('foo\n<search>\nbar\n</search>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser starts an HTML block here, but GitHub Flavored Markdown continues the paragraph above]
+		`);
+	});
+
+	test('formats raw HTML after text on several lines that only Prettier reads as HTML', async () => {
+		const input = '<!doctype\nhtml>\n\nfoo <b   >bar</b>\n';
+		const expectedOutput = '<!doctype\nhtml>\n\nfoo <b>bar</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after text on several lines that only Prettier reads as HTML in block quotes', async () => {
+		const input = '> <!doctype\n> html>\n\nfoo <b   >bar</b>\n';
+		const expectedOutput = '> <!doctype\n> html>\n\nfoo <b>bar</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML in later list items after text on several lines that only Prettier reads as HTML', async () => {
+		const input = '- <!doctype\n  html>\n\n- foo <b   >bar</b>\n';
+		const expectedOutput = '- <!doctype\n  html>\n\n- foo <b>bar</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after text on several lines that only Prettier reads as HTML with fences that close inside it', async () => {
+		const input = '<!doctype\n```\n```\nhtml>\n\nfoo <b   >bar</b>\n';
+		const expectedOutput = '<!doctype\n```\n```\nhtml>\n\nfoo <b>bar</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after text on several lines that only Prettier reads as HTML with list markers inside fences that close inside it', async () => {
+		const input =
+			'<!doctype\n```\n- foo\n```\nhtml>\n\nbar <b   >baz</b>\n';
+		const expectedOutput =
+			'<!doctype\n```\n- foo\n```\nhtml>\n\nbar <b>baz</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when GFM continues its paragraph into raw HTML', async () => {
+		await expect(
+			format('<!doctype\nhtml>\nfoo <b>bar</b>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when a fence it opens reaches raw HTML', async () => {
+		await expect(
+			format(
+				'<!doctype\n```\nhtml>\n\n<b>foo</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when a fence it opens closes before raw HTML', async () => {
+		await expect(
+			format(
+				'<!doctype\n```\nhtml>\n\n```\n\n<b>foo</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when a later line starts with a block quote marker', async () => {
+		await expect(
+			format('<!doctype\n> foo\n\n<b>bar</b>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when a list item it starts reaches raw HTML', async () => {
+		await expect(
+			format(
+				'<!doctype\n- foo\nhtml>\n\n  <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when an ordered list item it starts reaches raw HTML', async () => {
+		await expect(
+			format(
+				'<!doctype\n1. foo\nhtml>\n\n   <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when a tilde fence it opens reaches raw HTML', async () => {
+		await expect(
+			format(
+				'<!doctype\n~~~\nhtml>\n\n<b>foo</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when a fence it opens follows a line with a backtick in its info string', async () => {
+		await expect(
+			format(
+				'<!doctype\n```foo`bar\n```\nhtml>\n\nbaz <b   >qux</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+		await expect(
+			format(
+				'<!doctype\n```foo\u2028`bar\n```\nhtml>\n\nbaz <b   >qux</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML between blank lines inside raw HTML elements', async () => {
+		await expect(
+			format(
+				'<div>\n\n<!doctype\nhtml>\n\n</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (3:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML when it continues a list item that reaches raw HTML', async () => {
+		await expect(
+			format(
+				'- foo\n<!doctype html>\n\n  <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when it continues a list item that reaches raw HTML', async () => {
+		await expect(
+			format(
+				'- foo\n<!doctype\nhtml>\n\n  <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text on several lines that only Prettier reads as HTML when it continues a block quote that reaches raw HTML', async () => {
+		await expect(
+			format(
+				'> foo\n<!doctype\nhtml>\n>\n> <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML when it continues a list item in a block quote that reaches raw HTML', async () => {
+		await expect(
+			format(
+				'> - foo\n> <!doctype html>\n>\n>   <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:3):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML when it continues a list item ending with such text and reaches raw HTML', async () => {
+		await expect(
+			format(
+				'- <!doctype html>\n<!doctype html>\n\n  <b   >foo</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML when it continues a list item ending with a link reference definition and reaches raw HTML', async () => {
+		await expect(
+			format(
+				'- [foo]: bar\n<!doctype html>\n\n  <b   >baz</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('rejects text that only Prettier reads as HTML directly after a list item ending with a fence when later lines contain raw HTML', async () => {
+		await expect(
+			format(
+				'- ```\n  foo\n  ```\n<!doctype html>\n\n  <b   >bar</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (4:1):
+
+			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
+		`);
+	});
+
+	test('formats raw HTML after text that only Prettier reads as HTML when a blank line separates it from a preceding list item', async () => {
+		const input = '- foo\n\n<!doctype html>\n\n  <b   >bar</b>\n';
+		const expectedOutput = '- foo\n\n<!doctype html>\n\n<b>bar</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
 	});
 });
 
@@ -891,327 +1569,6 @@ describe('Non-Element Markup', () => {
 		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
 			output
 		);
-	});
-
-	test('leaves inline declarations that GFM reads as text to Prettier', async () => {
-		const input = 'foo <!DOCTYPE> bar\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(
-			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
-		);
-	});
-
-	test('leaves inline declarations with whitespace that GFM doesn’t accept to Prettier', async () => {
-		const input = 'foo <!DOCTYPE\u00A0HTML> bar\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(
-			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
-		);
-	});
-
-	test('rejects inline declarations that GFM reads as text around raw HTML', async () => {
-		await expect(
-			format(
-				'foo <!doctype <pre>\n\nbar    <b   >baz</b>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
-
-			Prettier’s Markdown parser reads this as a declaration, but GitHub Flavored Markdown reads it as text with raw HTML inside]
-		`);
-	});
-
-	test('leaves declarations that only Prettier reads as HTML blocks to Prettier', async () => {
-		const input = '<div   ></div>\n\n<!doctype   html>\n';
-		const expectedOutput = '<div></div>\n\n<!doctype   html>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
-			output
-		);
-	});
-
-	test('leaves text that only Prettier reads as HTML in paragraphs without raw HTML to Prettier', async () => {
-		const input = 'foo\n<!doctype html>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(
-			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
-		);
-	});
-
-	test('leaves text on several lines that only Prettier reads as HTML to Prettier', async () => {
-		const input = '<!doctype\nhtml>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(
-			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
-		);
-	});
-
-	test('rejects HTML blocks that only Prettier reads around raw HTML', async () => {
-		await expect(
-			format('<!doctype html> <b>foo</b>\n', SPEC_EXAMPLE_OPTIONS)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML when GFM continues its paragraph', async () => {
-		await expect(
-			format('<!doctype html>\n<b   >foo</b>\n', SPEC_EXAMPLE_OPTIONS)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML when GFM continues a paragraph into it', async () => {
-		await expect(
-			format('- <b>foo</b>\n<!doctype html>\n', SPEC_EXAMPLE_OPTIONS)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML before lines that start HTML blocks', async () => {
-		await expect(
-			format(
-				'<!doctype\n<pre "x"\n>\n\nfoo    <b   >bar</b>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML before lines that start Markdown blocks', async () => {
-		await expect(
-			format('<!doctype\n```\n>\n\n<b   >x</b>\n', SPEC_EXAMPLE_OPTIONS)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML before lazy continuation lines', async () => {
-		await expect(
-			format('- <!doctype html>\nfoo <b   >x</b>\n', SPEC_EXAMPLE_OPTIONS)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML before lines with only nonbreaking spaces', async () => {
-		await expect(
-			format(
-				'- <!doctype html>\n\u00A0\nfoo <b   >bar</b>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML before lines with only form feeds', async () => {
-		await expect(
-			format(
-				'- <!doctype html>\n\f\nfoo <b   >bar</b>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML before indented quote markers', async () => {
-		await expect(
-			format(
-				'<!doctype html>\n    >\n<b   >x</b>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('leaves text that only Prettier reads as HTML before quote markers in list items to Prettier', async () => {
-		const input = '- <!doctype html>\n    >\n    <b   >x</b>\n';
-		const expectedOutput = '- <!doctype html>\n    >\n    <b>x</b>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
-			output
-		);
-	});
-
-	test('leaves text that only Prettier reads as HTML before quote markers in lists in block quotes to Prettier', async () => {
-		const input = '> - <!doctype html>\n>   >\n>   <b   >x</b>\n';
-		const expectedOutput = '> - <!doctype html>\n>     >\n>     <b>x</b>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
-			output
-		);
-	});
-
-	test('leaves text that only Prettier reads as HTML before empty quote markers in nested block quotes to Prettier', async () => {
-		const input = '> > <!doctype html>\n>\n> <b>x</b>\n';
-
-		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
-	});
-
-	test('leaves text that only Prettier reads as HTML before unindented quote markers in list items to Prettier', async () => {
-		const input = '- <!doctype html>\n>\n<b   >x</b>\n';
-		const expectedOutput = '- <!doctype html>\n\n>\n\n<b>x</b>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
-			output
-		);
-	});
-
-	test('leaves text that only Prettier reads as HTML before underindented quote markers in list items to Prettier', async () => {
-		const input = '123. <!doctype html>\n   >\n<b   >x</b>\n';
-		const expectedOutput = '123. <!doctype html>\n\n>\n\n<b>x</b>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
-			output
-		);
-	});
-
-	test('leaves text that only Prettier reads as HTML before padded blank lines in lists in block quotes to Prettier', async () => {
-		const input = '> - <!doctype html>\n>   \n>   <b   >x</b>\n';
-		const expectedOutput = '> - <!doctype html>\n>\n>     <b>x</b>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
-			output
-		);
-	});
-
-	test('rejects text that only Prettier reads as HTML before quote markers that continue lazily', async () => {
-		await expect(
-			format(
-				'> <!doctype html>\n    >\n> <b   >x</b>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML before quote markers that continue lazily in lists', async () => {
-		await expect(
-			format(
-				'> - <!doctype html>\n     >\n>   <b   >x</b>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML before quote markers with too little list indentation', async () => {
-		await expect(
-			format(
-				'123. <!doctype html>\n    >\n<b   >x</b>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:6):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML inside raw HTML elements', async () => {
-		await expect(
-			format(
-				'<div>\n\n<!doctype html>\nfoo\n\n</div>\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (3:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('rejects text that only Prettier reads as HTML inside comments', async () => {
-		await expect(
-			format(
-				'<div></div>\n<!-- c\n\n<!doctype html>\nfoo\n\n<div>-->\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (4:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
-	});
-
-	test('leaves text that only Prettier reads as HTML between blank lines inside raw HTML elements to Prettier', async () => {
-		const input = '<div>\n\n<!doctype html>\n\n</div>\n';
-
-		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
-
-		expect(output).toBe(
-			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
-		);
-	});
-
-	test('rejects text that only Prettier reads as HTML next to tags on several lines', async () => {
-		await expect(
-			format(
-				'<!doctype html>\nfoo <img\nsrc="x">\n',
-				SPEC_EXAMPLE_OPTIONS
-			)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
-
-			Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown]
-		`);
 	});
 
 	test('rejects comments that take in the end of a generated block quote', async () => {
@@ -2009,16 +2366,6 @@ describe('Block Boundaries', () => {
 		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
 			output
 		);
-	});
-
-	test('rejects HTML blocks that only Prettier lets interrupt a paragraph', async () => {
-		await expect(
-			format('foo\n<search>\nbar\n</search>\n', SPEC_EXAMPLE_OPTIONS)
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
-
-			Prettier’s Markdown parser starts an HTML block here, but GitHub Flavored Markdown continues the paragraph above]
-		`);
 	});
 
 	test('accepts raw text blocks that Prettier leaves open at the end of their container', async () => {

@@ -10,7 +10,7 @@ Formatting follows Prettier’s style while preserving [GitHub Flavored Markdown
 
 Malformed HTML produces an error. The same applies when the required formatting can’t preserve meaning or meet the [stability guarantee](#stability). The first successful pass meets those requirements.
 
-Other Markdown follows Prettier. Differences or defects in Prettier’s parsers and printers, or quirks of the reference renderer, require no detection, repair, or additional error when their effects stay outside the formatting scope. This upstream exception includes changes in meaning and instability.
+Outside the [parser disagreement limits](#parser-disagreement), other Markdown follows Prettier. Differences or defects in Prettier’s parsers and printers, or quirks of the reference renderer, require no detection, repair, or additional error when their effects stay outside the formatting scope. This upstream exception includes changes in meaning and instability.
 
 The [reference profile](#gfm-profile) defines the GFM interpretation that formatting preserves.
 
@@ -61,11 +61,30 @@ HTML-like text in image descriptions becomes literal alternative text in the ref
 
 Prettier’s HTML parser determines accepted syntax, including custom elements and foreign content such as SVG. The plugin adds no separate conformance checks for attributes, permitted children, or document wrappers.
 
-MDX, JSX, and template syntax receive their ordinary interpretation under GFM and Prettier’s HTML parser. They introduce no additional dialect or execution semantics. The plugin doesn’t infer another language or rewrite literal text to accommodate it. Frontmatter, math, and other syntax specific to Prettier follow its formatting outside the [formatting scope](#formatting-scope). Source that the reference profile recognizes as raw HTML remains subject to this specification even when Prettier assigns it to another construct.
+MDX, JSX, and template syntax receive their ordinary interpretation under GFM and Prettier’s HTML parser. They introduce no additional dialect or execution semantics. The plugin doesn’t infer another language or rewrite literal text to accommodate it.
+
+Other Prettier plugins can format unrelated languages. A replacement for the Markdown or HTML parser or printer is compatible only when it supports this specification within the formatting scope. Detected incompatibilities that prevent required raw HTML formatting or validation, such as an unsupported Markdown syntax tree, produce an error instead of silently skipping that work. Arbitrary third-party replacements have no compatibility guarantee.
+
+### Parser Disagreement
+
+Prettier’s Markdown parser can assign source a different role from the reference profile. The reference profile still determines what is raw HTML, Markdown, or literal content. The acceptance limits below keep those disagreements from compromising formatting or document context. They can produce an unsupported Markdown error even when the HTML is well-formed or the reference profile finds only literal text.
+
+Frontmatter, math, Liquid tags, and wiki links follow Prettier outside the [formatting scope](#formatting-scope). When Prettier reads source as one of these constructs and the reference profile recognizes raw HTML within it, formatting reports an unsupported Markdown error. The plugin doesn’t rewrite that HTML or return the construct unchanged as a fallback. This restriction follows Prettier’s classification, not the delimiters alone. For example, single-dollar text remains ordinary Markdown when Prettier doesn’t recognize it as math.
 
 Prettier’s Markdown parser recognizes `[^foo]: bar` as a footnote definition and treats following indented markup as its content. The reference profile disables footnotes and interprets that line as an ordinary link reference definition. At the document root, markup indented by four spaces after the definition and a blank line is therefore code under the reference profile. The plugin doesn’t format that code as HTML. Changes made by Prettier’s footnote formatting follow the upstream exception unless they affect covered HTML content or boundaries.
 
-Other Prettier plugins can format unrelated languages. A replacement for the Markdown or HTML parser or printer is compatible only when it supports this specification within the formatting scope. Detected incompatibilities that prevent required raw HTML formatting or validation, such as an unsupported Markdown syntax tree, produce an error instead of silently skipping that work. Arbitrary third-party replacements have no compatibility guarantee.
+Raw HTML in a footnote definition is supported only where each raw HTML token in the reference reading is inline and matches HTML source in Prettier’s footnote definition. A raw HTML block in the reference reading is unsupported.
+
+Text that Prettier reads as HTML but the reference profile reads as Markdown stays outside HTML formatting. An inline declaration with raw HTML inside that Markdown reading is unsupported. A block containing raw HTML is also unsupported when the reference profile doesn’t read each of its lines as part of an HTML block or a blank line, or when the block interrupts a paragraph only for Prettier.
+
+For a block that the reference profile reads entirely as Markdown text, support depends on the surrounding source. These checks look for raw HTML tokens and HTML block starts, including an unfinished tag such as `</div`:
+
+- Source before and after the block, through the nearest blank line or Markdown container edge, contains neither raw HTML tokens nor HTML block starts. An HTML block that has ended on the preceding line also separates the source. The following source is separate when an HTML block starts on the next line and can interrupt a paragraph. Other Markdown block starts don’t establish separation for this check.
+- Within raw HTML or protected content, the block occupies one line and stands alone between blank lines or Markdown container edges.
+- When the block immediately follows a list or block quote, with no blank line between them, the check extends to the rest of the document. The container can continue in the reference reading after Prettier has closed it. The check doesn’t infer whether the container’s last content prevents that continuation. This applies to single-line and multi-line blocks, including within nested containers.
+- For a multi-line block, a block quote or list item marker on a later line, or a fence left open at the end of the block, extends the check to the rest of the document. Markers inside a fence that the block opens and closes don’t count. Markers count even where GFM would read them as text or a thematic break.
+
+Where a check extends to the rest of the document, a raw HTML token or HTML block start anywhere later makes the arrangement unsupported. These are conservative source checks, not a reconstruction of GFM’s paragraph and container boundaries. The same syntax counts even when an escape, code span, or code block would make it literal. The plugin neither validates nor formats that literal sequence as HTML. If a check fails, the combination produces an unsupported Markdown error. Otherwise, Prettier formats the block, subject to the applicable content protection rules.
 
 ## Input Acceptance
 
@@ -530,9 +549,9 @@ Unless Prettier skips the file, HTML validation covers the complete document, in
 
 Document line endings and the final newline follow Prettier. HTML formatting and its Markdown adjustments use the selected line endings and introduce neither mixed line endings nor extra blank lines at the end. Temporary markers and internal formatting state never appear in the result.
 
-Formatting reports an error when raw HTML violates an acceptance rule, Prettier throws an error, a required integration is incompatible, or the permitted layout can’t meet preservation, protection, range, and stability requirements within the [formatting scope](#formatting-scope). A valid but unsupported arrangement is distinct from an HTML syntax error. The plugin never converts these errors into a partly formatted document or unchanged source.
+Formatting reports an error when raw HTML violates an acceptance rule, a [parser disagreement](#parser-disagreement) is unsupported, Prettier throws an error, a required integration is incompatible, or the permitted layout can’t meet preservation, protection, range, and stability requirements within the [formatting scope](#formatting-scope). A valid but unsupported arrangement is distinct from an HTML syntax error. The plugin never converts these errors into a partly formatted document or unchanged source.
 
-Each error identifies the plugin and includes the file path when supplied. Errors distinguish rejected HTML, unsafe Markdown layout, and incompatible formatter integration, while retaining any underlying error as the cause. Available source positions refer to the original Markdown, not an internal fragment or generated wrapper. Exact diagnostic wording is outside this contract.
+Each error identifies the plugin and includes the file path when supplied. Errors distinguish rejected HTML, unsupported Markdown, unsafe Markdown layout, and incompatible formatter integration, while retaining any underlying error as the cause. Available source positions refer to the original Markdown, not an internal fragment or generated wrapper. Exact diagnostic wording is outside this contract.
 
 ## Conformance
 

@@ -13,6 +13,15 @@ import sliceMarkdownSource, {
 	isParagraphBreak,
 } from '../slice-markdown-source/index.ts';
 
+// Block quote and list item markers that can start a container, including
+// some that the reference renderer reads as text
+const CONTAINER_START_PATTERN =
+	/^ {0,3}(?:>|[*+-](?:[\t ]|$)|\d{1,9}[).](?:[\t ]|$))/;
+
+// A possible fence opening after up to three spaces. A backtick fence’s info
+// string can’t contain a backtick
+const FENCE_OPENING_PATTERN = /^ {0,3}(?:(`{3,})(?![^`]*`)|(~{3,}))/;
+
 // This pattern matches inline declarations recognized by the reference
 // renderer: `<!`, an uppercase name, ASCII whitespace, and the rest up to `>`
 const GFM_DECLARATION_PATTERN = /^<![A-Z]+[\t\n\v\f\r ][^>]*>$/;
@@ -604,11 +613,12 @@ function isMarkdownText(node: AST.HTMLNode, parent: AST.Node): boolean {
 
 /**
  * Checks whether Prettier can format a block of Markdown text that it reads as
- * HTML without moving raw HTML. For a one-line block, surrounding paragraph
- * lines must be free of raw HTML. Blank lines, a container start, a preceding
- * HTML block that has ended, or a following HTML block that interrupts the
- * paragraph bound this check. A multi-line block uses the same check before it,
- * but checks every line after it through the end of the document.
+ * HTML without moving raw HTML. Surrounding paragraph lines must be free of raw
+ * HTML. Blank lines, a container start, a preceding HTML block that has ended,
+ * or a following HTML block that interrupts the paragraph bound this check.
+ * As a conservative bound, the check extends to the end of the document when
+ * the block immediately follows a block quote or list, or when
+ * `findReachedLines` finds that a multi-line block can reach later lines.
  */
 function canLeaveToPrettier(
 	node: AST.HTMLNode,
@@ -645,18 +655,64 @@ function canLeaveToPrettier(
 		? []
 		: findParagraphLines(sourceLines, start - 2, -1, isBreak).toReversed();
 
-	// A later line of the block can open a fence or another block that extends
-	// to the end of the document
-	if (start !== end) {
-		return !hasRawHTML([...before, ...sourceLines.slice(end)]);
+	// The reference renderer can continue a paragraph that ends a preceding
+	// block quote or list item through this block, so that container can take
+	// in later lines. As a conservative bound, this applies whatever block
+	// Prettier reads at the end of the container
+	const continuesContainer =
+		(previous?.type === 'blockquote' || previous?.type === 'list') &&
+		isOnNextLine(previous, node);
+	const after = continuesContainer
+		? sourceLines.slice(end)
+		: ((start === end
+				? undefined
+				: findReachedLines(node, sourceLines, end)) ??
+			(isBeforeBlock
+				? []
+				: findParagraphLines(sourceLines, end, 1, isBreak)));
+
+	return !hasRawHTML([...before, ...after]);
+}
+
+/**
+ * Returns all lines after a multi-line block as a conservative bound when its
+ * later lines match `CONTAINER_START_PATTERN` outside a fence or leave a fence
+ * open. Containers can continue past blank lines, and Prettier can read a
+ * closing fence beyond the block as an opening. Returns `undefined` otherwise
+ * so the caller uses the normal paragraph check.
+ */
+function findReachedLines(
+	node: AST.HTMLNode,
+	sourceLines: ReadonlyArray<string>,
+	end: number
+): string[] | undefined {
+	let fence: string | undefined;
+
+	for (const line of getBlockSource(node).split('\n').slice(1)) {
+		if (fence) {
+			fence = isClosingFence(line, fence) ? undefined : fence;
+		} else if (CONTAINER_START_PATTERN.test(line)) {
+			return sourceLines.slice(end);
+		} else {
+			const opening = FENCE_OPENING_PATTERN.exec(line);
+			fence = opening?.[1] ?? opening?.[2];
+		}
 	}
 
-	return !hasRawHTML([
-		...before,
-		...(isBeforeBlock
-			? []
-			: findParagraphLines(sourceLines, end, 1, isBreak)),
-	]);
+	return fence === undefined ? undefined : sourceLines.slice(end);
+}
+
+/**
+ * Checks whether a line closes a fence that opened with the given marker.
+ */
+function isClosingFence(line: string, fence: string): boolean {
+	const marker = /^ {0,3}(`+|~+)[\t ]*$/.exec(line)?.[1];
+
+	return (
+		marker !== undefined &&
+		marker.startsWith(fence[0]!) &&
+		marker.length >= fence.length
+	);
 }
 
 /**
@@ -879,6 +935,11 @@ function renderReferenceReading(
 	} as ParserOptions) as AST.RootNode;
 	const originalHTMLNodes = findHTMLNodes(node).map(({ html }) => html);
 	const insertions = mapInsertions(sliced.text, text);
+	const blockStarts = new Set(
+		findHTMLNodes(root)
+			.filter(({ html }) => startsReferenceBlock(html, text))
+			.map(({ html }) => html)
+	);
 
 	relocate(root, (offset) => sliced.offsets[insertions[offset]!]!, source);
 
@@ -893,7 +954,7 @@ function renderReferenceReading(
 			({ value }) => value === html.value
 		);
 
-		if (index === -1 || isBlockContainer(parent)) {
+		if (index === -1 || isBlockContainer(parent) || blockStarts.has(html)) {
 			reportUnsupportedMarkdown({
 				filepath: state.options.filepath,
 				position: node.position?.start,
@@ -924,6 +985,30 @@ function renderReferenceReading(
 		node,
 		start,
 	});
+}
+
+/**
+ * Checks whether inline HTML from Prettier’s Markdown parser starts a line
+ * where the reference renderer starts an HTML block that can interrupt a
+ * paragraph, as with tags that only the reference renderer treats as block
+ * tags.
+ */
+function startsReferenceBlock(html: AST.HTMLNode, text: string): boolean {
+	const offset = html.position?.start.offset;
+
+	if (offset === undefined) {
+		return false;
+	}
+
+	const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+	const lineEnd = text.indexOf('\n', offset);
+
+	return (
+		/^[\t ]*$/.test(text.slice(lineStart, offset)) &&
+		canInterruptParagraph(
+			text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
+		)
+	);
 }
 
 /**
