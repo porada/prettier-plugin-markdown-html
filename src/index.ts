@@ -14,8 +14,12 @@ import {
 } from './plugin-hooks/index.ts';
 import preprocessMarkdown, {
 	formattedHTMLNodes,
+	validateMarkdown,
 } from './preprocess-markdown/index.ts';
-import printMarkdown, { alignListItemHTML } from './print-markdown/index.ts';
+import printMarkdown, {
+	alignListItemHTML,
+	printPrettierIgnored,
+} from './print-markdown/index.ts';
 
 const htmlOptions = (pluginHTML as Plugin).options!;
 const markdownOptions = (pluginMarkdown as Plugin).options!;
@@ -25,6 +29,10 @@ const priorParserResolverByName = new Map<
 	ParserName,
 	ReturnType<typeof createPriorParserResolver>
 >();
+
+// Text lengths before parser preprocessing, matching Prettier’s range
+// comparison
+const sourceLengths = new WeakMap<ParserOptions, number>();
 
 /**
  * Creates a parser that defers to the prior compatible parser before Prettier’s
@@ -39,26 +47,40 @@ function createParser(name: ParserName): Parser {
 	): Promise<unknown> {
 		const priorParser = await resolvePriorParser(options, 'parse');
 
-		if (priorParser) {
-			return withPriorParserOptions(
-				options,
-				priorParser,
-				(delegatedOptions) =>
-					callParserWithCompatibility(
-						priorParser.parser,
-						text,
-						delegatedOptions
-					)
+		const ast = priorParser
+			? await withPriorParserOptions(
+					options,
+					priorParser,
+					(delegatedOptions) =>
+						callParserWithCompatibility(
+							priorParser.parser,
+							text,
+							delegatedOptions
+						)
+				)
+			: await callParserWithCompatibility(nativeParser, text, options);
+
+		// Prettier skips printer preprocessing for a partial Markdown range, so
+		// validation runs during parsing
+		if (
+			options.rangeStart > 0 ||
+			options.rangeEnd < (sourceLengths.get(options) ?? text.length)
+		) {
+			await validateMarkdown(
+				await prepareRoot(ast as AST.Node, options),
+				options
 			);
 		}
 
-		return await callParserWithCompatibility(nativeParser, text, options);
+		return ast;
 	}
 
 	const preprocess: NonNullable<Parser['preprocess']> = async (
 		text: string,
 		options: ParserOptions
 	) => {
+		sourceLengths.set(options, text.length);
+
 		const priorParser = await resolvePriorParser(options, 'preprocess');
 		const priorPreprocess = priorParser?.parser.preprocess;
 
@@ -101,49 +123,65 @@ export const parsers: Plugin['parsers'] = {
 	remark: createParser('remark'),
 };
 
+/**
+ * Prepares a Markdown syntax tree for printing with the prior or native
+ * printer’s preprocessing.
+ */
+async function prepareRoot(
+	ast: AST.Node,
+	options: ParserOptions
+): Promise<AST.Node> {
+	const priorPrinter = await resolvePriorPrinter(options);
+	const priorPreprocess = priorPrinter?.printer.preprocess;
+
+	let root: AST.Node;
+
+	if (priorPrinter && typeof priorPreprocess === 'function') {
+		root = await withPriorPrinterOptions(
+			options,
+			priorPrinter,
+			(delegatedOptions): AST.Node | Promise<AST.Node> => {
+				const preprocessed = priorPreprocess.call(
+					priorPrinter.printer,
+					ast,
+					delegatedOptions
+				) as AST.Node | Promise<AST.Node>;
+
+				return preprocessed;
+			}
+		);
+	} else {
+		const nativePreprocess = markdownPrinters.mdast.preprocess;
+
+		/* v8 ignore next -- @preserve */
+		root = (
+			typeof nativePreprocess === 'function'
+				? await nativePreprocess.call(
+						markdownPrinters.mdast,
+						ast,
+						options
+					)
+				: ast
+		) as AST.Node;
+	}
+
+	return root;
+}
+
 const mdastPrinter: Printer<AST.Node> = {
 	...markdownPrinters.mdast,
 
 	async preprocess(ast, options) {
-		const priorPrinter = await resolvePriorPrinter(options);
-		const priorPreprocess = priorPrinter?.printer.preprocess;
-
-		let root: AST.Node;
-
-		if (priorPrinter && typeof priorPreprocess === 'function') {
-			root = await withPriorPrinterOptions(
-				options,
-				priorPrinter,
-				(delegatedOptions): AST.Node | Promise<AST.Node> => {
-					const preprocessed = priorPreprocess.call(
-						priorPrinter.printer,
-						ast,
-						delegatedOptions
-					) as AST.Node | Promise<AST.Node>;
-
-					return preprocessed;
-				}
-			);
-		} else {
-			const nativePreprocess = markdownPrinters.mdast.preprocess;
-
-			/* v8 ignore next -- @preserve */
-			root = (
-				typeof nativePreprocess === 'function'
-					? await nativePreprocess.call(
-							markdownPrinters.mdast,
-							ast,
-							options
-						)
-					: ast
-			) as AST.Node;
-		}
-
 		// Analysis and error positions use the source columns
-		const preprocessed = await preprocessMarkdown(root, options);
-		alignListItemHTML(preprocessed);
-		return preprocessed;
+		const root = await preprocessMarkdown(
+			await prepareRoot(ast, options),
+			options
+		);
+		alignListItemHTML(root);
+		return root;
 	},
+
+	printPrettierIgnored,
 
 	print(path, options, print, args) {
 		const printed = printMarkdown(path, options, print, args);

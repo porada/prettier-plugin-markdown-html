@@ -25,6 +25,20 @@ export function reportUnsafeLayout(details: ErrorDetails): never {
 }
 
 /**
+ * Throws an error when formatting would give an element’s opening and closing
+ * tags different names.
+ */
+export function reportChangedTagSpelling(
+	sourceName: string,
+	details: Omit<ErrorDetails, 'reason'>
+): never {
+	return reportUnsafeLayout({
+		...details,
+		reason: `Formatting would give this \`<${sourceName}>\` element different opening and closing tag names, which Prettier’s HTML parser would not match`,
+	});
+}
+
+/**
  * Throws an error for valid Markdown that the plugin can’t format, such as a
  * construct that Prettier’s Markdown parser reads differently from GFM.
  */

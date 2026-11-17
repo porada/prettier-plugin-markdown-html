@@ -3,11 +3,19 @@ import type { AST } from '../types/index.d.ts';
 import analyzeDocumentContext from '../analyze-document-context/index.ts';
 import checkProtectedMarkdown from '../check-protected-markdown/index.ts';
 import checkReferenceReadings from '../check-reference-readings/index.ts';
-import formatBlockHTML from '../format-block-html/index.ts';
-import formatInlineHTML from '../format-inline-html/index.ts';
+import formatBlockHTML, {
+	checkSourceBlocks,
+	IGNORE_COMMENT_PATTERN,
+} from '../format-block-html/index.ts';
+import formatInlineHTML, {
+	formatInlineTagName,
+} from '../format-inline-html/index.ts';
 import isLooseList, { isSeparatedFromNext } from '../is-loose-list/index.ts';
 import renderDocumentContext from '../render-document-context/index.ts';
-import { reportUnsafeLayout } from '../report-error/index.ts';
+import {
+	reportChangedTagSpelling,
+	reportUnsafeLayout,
+} from '../report-error/index.ts';
 
 type ScopeLayout = Pick<
 	AST.BlockScope,
@@ -25,6 +33,8 @@ type ScopeState = {
 	blockFragments: Set<AST.HTMLNode>;
 	fragments: Set<AST.HTMLNode>;
 	ignoredNodes: Set<AST.Node>;
+	// Whether processing validates the input without formatting it
+	isValidationOnly: boolean;
 	options: ParserOptions;
 	// Where each paragraph’s printed lines and its container’s content start
 	paragraphEdges: Map<
@@ -32,9 +42,6 @@ type ScopeState = {
 		Pick<AST.InlineLayout, 'containerEdge' | 'contentEdge'>
 	>;
 };
-
-const IGNORE_COMMENT_PATTERN =
-	/^<!--\s*prettier-ignore(?:-(end|start))?\s*-->$/;
 
 // Prettier prints no list item number above this one
 const MAX_LIST_NUMBER = 999_999_999;
@@ -49,6 +56,29 @@ export const formattedHTMLNodes = new WeakSet<AST.Node>();
 export default async function preprocessMarkdown(
 	root: AST.Node,
 	options: ParserOptions
+): Promise<AST.Node> {
+	return processMarkdown(root, options, false);
+}
+
+/**
+ * Reports an error when raw HTML throughout a Markdown syntax tree is rejected
+ * in its document context, without formatting it.
+ */
+export async function validateMarkdown(
+	root: AST.Node,
+	options: ParserOptions
+): Promise<void> {
+	await processMarkdown(root, options, true);
+}
+
+/**
+ * Validates and, unless only validation is requested, formats the raw HTML in a
+ * Markdown syntax tree.
+ */
+async function processMarkdown(
+	root: AST.Node,
+	options: ParserOptions,
+	isValidationOnly: boolean
 ): Promise<AST.Node> {
 	if (!isRootNode(root)) {
 		return root;
@@ -66,29 +96,39 @@ export default async function preprocessMarkdown(
 	// Without raw HTML, only raw HTML that Prettier’s formatting adds is in the
 	// plugin’s scope
 	if (context.fragments.length === 0) {
-		await checkReferenceReadings(
-			context,
-			[],
-			new Map(),
-			isIgnored,
-			options
-		);
+		if (!isValidationOnly) {
+			await checkReferenceReadings(
+				context,
+				[],
+				new Map(),
+				isIgnored,
+				options
+			);
+		}
+
 		return root;
 	}
 
 	const analysis = await analyzeDocumentContext(context, options);
-	await checkReferenceReadings(
-		context,
-		analysis.protectedRanges,
-		analysis.readingContainers,
-		isIgnored,
-		options
-	);
-	await checkProtectedMarkdown(
-		analysis.protectedMarkdown,
-		isIgnored,
-		options
-	);
+
+	// These checks compare the affected constructs before and after Prettier’s
+	// Markdown formatting
+	if (!isValidationOnly) {
+		await checkReferenceReadings(
+			context,
+			analysis.protectedRanges,
+			analysis.readingContainers,
+			isIgnored,
+			options
+		);
+		await checkProtectedMarkdown(
+			analysis.protectedMarkdown,
+			isIgnored,
+			options
+		);
+		await checkSplitElements(analysis.splitElements, ignoredNodes, options);
+	}
+
 	const state: ScopeState = {
 		activeIgnoreComments,
 		analysis,
@@ -99,6 +139,7 @@ export default async function preprocessMarkdown(
 		),
 		fragments: new Set(context.fragments.map(({ node }) => node)),
 		ignoredNodes,
+		isValidationOnly,
 		options,
 		paragraphEdges: new Map(),
 	};
@@ -116,6 +157,10 @@ export default async function preprocessMarkdown(
 		state
 	);
 
+	if (isValidationOnly) {
+		return root;
+	}
+
 	for (const fragments of groupInlineFragments(context, ignoredNodes)) {
 		await formatInlineHTML(
 			fragments,
@@ -127,6 +172,49 @@ export default async function preprocessMarkdown(
 	}
 
 	return root;
+}
+
+/**
+ * Reports an error when formatting would give an element split across fragments
+ * different opening and closing tag names. Ignored tags keep their source
+ * spelling. HTML blocks use the name parsed in context, while inline tags are
+ * formatted on their own. The skeleton checks elements with both tags in HTML
+ * blocks.
+ */
+async function checkSplitElements(
+	splitElements: ReadonlyArray<AST.SplitElement>,
+	ignoredNodes: ReadonlySet<AST.Node>,
+	options: ParserOptions
+): Promise<void> {
+	for (const element of splitElements) {
+		const getPrintedName = async (
+			{ isBlock, node }: AST.Fragment,
+			isClosingTag: boolean
+		): Promise<string> => {
+			if (ignoredNodes.has(node)) {
+				return element.sourceName;
+			}
+
+			return isBlock
+				? element.name
+				: formatInlineTagName(
+						element.sourceName,
+						isClosingTag,
+						options,
+						node.position?.start
+					);
+		};
+
+		if (
+			(await getPrintedName(element.opening, false)) !==
+			(await getPrintedName(element.closing, true))
+		) {
+			reportChangedTagSpelling(element.sourceName, {
+				filepath: options.filepath,
+				position: element.opening.node.position?.start,
+			});
+		}
+	}
 }
 
 /**
@@ -199,6 +287,14 @@ async function formatScopes(
 		return;
 	}
 
+	if (state.isValidationOnly) {
+		checkSourceBlocks(
+			{ blockFragments, children: container.children, ignoredNodes },
+			options
+		);
+		return;
+	}
+
 	container.children = await formatBlockHTML(
 		{
 			...layout,
@@ -207,9 +303,12 @@ async function formatScopes(
 			children: container.children,
 			formattedNodes: formattedHTMLNodes,
 			ignoredNodes,
+			inlineClosingTags: analysis.inlineClosingTagsByFragment,
 			inlineOpeners: analysis.inlineOpenersByFragment,
 			protectedEnds: analysis.protectedEnds,
 			protectedStarts: analysis.protectedStarts,
+			trailingInlineClosingTags:
+				analysis.inlineClosingTagsByContainer.get(container) ?? [],
 		},
 		options
 	);
@@ -291,7 +390,9 @@ async function formatListScopes(
 	// reference renderer’s blank line rules to preserve the HTML’s context.
 	// Prettier prints ignored lists from their source
 	const separations =
-		!state.ignoredNodes.has(list) && containsFragment(list, state.fragments)
+		!state.isValidationOnly &&
+		!state.ignoredNodes.has(list) &&
+		containsFragment(list, state.fragments)
 			? list.children.map((item, index) =>
 					isSeparatedFromNext(
 						item,

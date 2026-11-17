@@ -1,5 +1,6 @@
-import type { Options } from 'prettier';
+import type { Options, Plugin } from 'prettier';
 import { format } from 'prettier';
+import { parsers as markdownParsers } from 'prettier/plugins/markdown';
 import { describe, expect, test } from 'vite-plus/test';
 import * as pluginMarkdownHTML from './index.ts';
 
@@ -9,6 +10,25 @@ const SPEC_EXAMPLE_OPTIONS = {
 	printWidth: 80,
 	tabWidth: 4,
 } satisfies Options;
+
+// Prettier adds code frames to parse error messages when a location is
+// available, using ANSI colors when supported
+async function getUncoloredErrorMessage(
+	promise: Promise<unknown>
+): Promise<string> {
+	try {
+		await promise;
+	} catch (error) {
+		if (error instanceof Error) {
+			/* oxlint-disable-next-line eslint/no-control-regex */
+			return error.message.replaceAll(/\u001B\[[\d;]*m/g, '');
+		}
+
+		throw error;
+	}
+
+	throw new Error('Expected the promise to reject');
+}
 
 describe('Formatting Scope', () => {
 	test('formats inline and block HTML while leaving code spans literal', async () => {
@@ -633,6 +653,109 @@ bar
 	test('keeps the case of SVG element names', async () => {
 		const input = 'foo <svg><clipPath   id="a"></clipPath></svg>\n';
 		const expectedOutput = 'foo <svg><clipPath id="a"></clipPath></svg>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('adds closing tags to elements with uppercase names', async () => {
+		const input = '<DIV   >\n\nfoo\n';
+		const expectedOutput = '<div>\n\nfoo\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('closes inline elements with uppercase names across HTML blocks', async () => {
+		const input = '- foo <SPAN>\n  <!-- bar -->\n  baz </SPAN>\n';
+		const expectedOutput =
+			'- foo <span>\n  <!-- bar -->\n    baz </span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects inline SVG opening tags that formatting would lowercase before closing tags in HTML blocks', async () => {
+		await expect(
+			format(
+				'- foo <svg><A>\n  <!-- bar --></A></svg>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:12):
+
+			Formatting would give this \`<A>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('rejects inline SVG opening tags with void element names before closing tags in HTML blocks', async () => {
+		await expect(
+			format(
+				'- foo <svg><COL>\n  <!-- bar --></COL></svg>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:12):
+
+			Formatting would give this \`<COL>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('adds no closing tags to elements that HTML blocks open and later inline HTML closes', async () => {
+		const input = '- <!-- foo --><span   >\n  bar </span>\n';
+		const expectedOutput = '- <!-- foo --><span>\n    bar </span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps HTML blocks outside elements that inline HTML closes before them', async () => {
+		const input =
+			'- <!-- foo --><span>\n  bar </span>\n  <div   >baz</div>\n';
+		const expectedOutput =
+			'- <!-- foo --><span>\n    bar </span>\n  <div>baz</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('adds no closing tags to elements that inline HTML opens with omitted closing tags across HTML blocks', async () => {
+		const input = '- foo <p   >bar\n  <!-- baz -->\n  qux\n';
+		const expectedOutput = '- foo <p>bar\n  <!-- baz -->\n    qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('closes elements that HTML blocks open inside elements that inline HTML opens', async () => {
+		const input =
+			'- foo <span>\n  <!-- bar --><b   >\n  baz </b>\n  <!-- qux -->\n  quux</span>\n';
+		const expectedOutput =
+			'- foo <span>\n  <!-- bar --><b>\n    baz </b>\n  <!-- qux -->\n    quux</span>\n';
 
 		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
 
@@ -1391,6 +1514,18 @@ describe('Content and Whitespace', () => {
 			output
 		);
 	});
+
+	test('keeps whitespace-only lines in preformatted content', async () => {
+		const input = '<pre>   \n\tx   \n  y</pre>\n';
+		const expectedOutput = '<pre>\n   \n\tx   \n  y</pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
 });
 
 describe('Indentation Across Fragments', () => {
@@ -1528,6 +1663,18 @@ describe('Indentation Across Fragments', () => {
 
 			This comment isn’t closed before the end of the document]
 		`);
+	});
+
+	test('keeps the indentation of ignore comments that Prettier doesn’t honor', async () => {
+		const input = ' <!-- prettier-ignore -->\n<div   >foo</div>\n';
+		const expectedOutput = ' <!-- prettier-ignore -->\n<div>foo</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
 	});
 });
 
@@ -1955,7 +2102,7 @@ describe('Inline HTML', () => {
 		const options = {
 			...SPEC_EXAMPLE_OPTIONS,
 			htmlFragmentSingleAttributePerLine: true,
-		};
+		} satisfies Options;
 
 		const expectedOutput = `# foo <span title="bar" class="baz">qux</span>
 
@@ -2533,7 +2680,7 @@ describe('Inline HTML', () => {
 		const options = {
 			...SPEC_EXAMPLE_OPTIONS,
 			singleAttributePerLine: true,
-		};
+		} satisfies Options;
 		const input =
 			'foo <img   srcset="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png 1x, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png 2x" alt="bar"> baz\n';
 		const expectedOutput =
@@ -2648,6 +2795,276 @@ describe('Inline HTML', () => {
 	});
 });
 
+describe('Effective HTML Options', () => {
+	test('leaves Markdown wrapping to the Prettier print width', async () => {
+		const input =
+			'Foo bar baz qux quux corge grault garply waldo fred plugh xyzzy thud.\n\n<div id="foo" class="bar" title="baz qux quux corge">grault</div>\n';
+		const expectedOutput =
+			'Foo bar baz qux quux corge grault garply\nwaldo fred plugh xyzzy thud.\n\n<div id="foo" class="bar" title="baz qux quux corge">grault</div>\n';
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			htmlFragmentPrintWidth: 100,
+			printWidth: 40,
+			proseWrap: 'always',
+		} satisfies Options;
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('applies the fragment print width to inline tags', async () => {
+		const input =
+			'foo <span id="foo" class="bar" title="baz qux">grault</span> garply\n';
+		const expectedOutput =
+			'foo <span\n    id="foo"\n    class="bar"\n    title="baz qux"\n    >grault</span> garply\n';
+		const options = { ...SPEC_EXAMPLE_OPTIONS, htmlFragmentPrintWidth: 30 };
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('leaves fenced HTML code to the Markdown formatting options', async () => {
+		const input =
+			'<p   >x</p>\n\n```html\n<div id="foo" class="bar" title="baz qux quux corge">grault <b>x</b>   </div>\n```\n';
+		const expectedOutput =
+			'<p>x</p>\n\n```html\n<div id="foo" class="bar" title="baz qux quux corge">grault <b>x</b></div>\n```\n';
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			htmlFragmentPrintWidth: 20,
+			htmlFragmentSingleAttributePerLine: true,
+			htmlFragmentWhitespaceSensitivity: 'ignore',
+		} satisfies Options;
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('narrows the fragment print width by container prefixes', async () => {
+		const input = '> - <div id="foo" class="bar">baz qux</div>\n';
+		const expectedOutput =
+			'> - <div id="foo" class="bar">\n>       baz qux\n>   </div>\n';
+		const options = { ...SPEC_EXAMPLE_OPTIONS, htmlFragmentPrintWidth: 30 };
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('breaks attributes when container prefixes leave too little width', async () => {
+		const input = '> - <div id="foo" class="bar">baz qux</div>\n';
+		const expectedOutput =
+			'> - <div\n>       id="foo"\n>       class="bar"\n>   >\n>       baz qux\n>   </div>\n';
+		const options = { ...SPEC_EXAMPLE_OPTIONS, htmlFragmentPrintWidth: 29 };
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('indents HTML with tabs without creating indented code', async () => {
+		const input =
+			'<div>\n<section>\n\nfoo\n\n<p   >bar</p>\n\n</section>\n</div>\n';
+		const expectedOutput =
+			'<div>\n\t<section>\n\nfoo\n\n<p>bar</p>\n\n</section>\n</div>\n';
+		const options = { ...SPEC_EXAMPLE_OPTIONS, useTabs: true };
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+});
+
+describe('Embedded Languages', () => {
+	test('keeps blank lines that embedded formatting adds in raw text blocks', async () => {
+		const input =
+			'<script type="text/markdown">\n# foo\n*   bar\n</script>\n';
+		const expectedOutput =
+			'<script type="text/markdown">\n    # foo\n\n    - bar\n</script>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps blank lines that embedded formatting adds in raw text with similar closing tags', async () => {
+		const input =
+			'<script type="text/markdown">\n`</scripture>`\n# foo\n</script>\n';
+		const expectedOutput =
+			'<script type="text/markdown">\n    `</scripture>`\n\n    # foo\n</script>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('removes blank lines that formatting adds after attribute values that mention raw text tags', async () => {
+		const input =
+			'- <ul>\n  <li title="<script>">foo\n  bar\n  <li>baz\n  </ul>\n- qux\n';
+		const expectedOutput =
+			'- <ul>\n      <li title="<script>">foo bar</li>\n      <li>baz</li>\n  </ul>\n- qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('removes blank lines that formatting adds after comments that mention raw text tags', async () => {
+		const input =
+			'- <ul>\n  <!-- <script> --><li>foo\n  bar\n  <li>baz\n  </ul>\n- qux\n';
+		const expectedOutput =
+			'- <ul>\n      <!-- <script> -->\n      <li>foo bar</li>\n      <li>baz</li>\n  </ul>\n- qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('removes blank lines that formatting adds after CDATA sections that mention raw text tags', async () => {
+		const input =
+			'- <ul>\n  <![CDATA[> <script>]]><li>foo\n  bar\n  <li>baz\n  </ul>\n- qux\n';
+		const expectedOutput =
+			'- <ul>\n      <![CDATA[> <script>]]>\n      <li>foo bar</li>\n      <li>baz</li>\n  </ul>\n- qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps blank lines that embedded formatting adds in raw text after processing instructions with quotes', async () => {
+		const input =
+			'<?foo ">\n<script type="text/markdown">\n# foo\n* bar\n</script>\n?>\n';
+		const expectedOutput =
+			'<?foo ">\n<script type="text/markdown">\n    # foo\n\n    - bar\n</script>\n?>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects blank lines that embedded formatting adds in other HTML blocks', async () => {
+		await expect(
+			format(
+				'<div>\n<script type="text/markdown">\n# foo\n*   bar\n</script>\n</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			After formatting, GitHub Flavored Markdown would no longer recognize this as an HTML block, and some of its content would be interpreted as Markdown]
+		`);
+	});
+
+	test('formats embedded styles in attributes', async () => {
+		const input = '<div style="color:red;display:block">x</div>\n';
+		const expectedOutput =
+			'<div style="color: red; display: block">x</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('leaves embedded styles in attributes unformatted when embedded language formatting is off', async () => {
+		const input = '<div style="color:red;display:block">x</div>\n';
+
+		await expect(
+			format(input, {
+				...SPEC_EXAMPLE_OPTIONS,
+				embeddedLanguageFormatting: 'off',
+			})
+		).resolves.toBe(input);
+	});
+
+	test('keeps the content of scripts in languages that Prettier doesn’t recognize', async () => {
+		const input = '<script type="text/x-foo">  a   =   b  </script>\n';
+		const expectedOutput =
+			'<script type="text/x-foo">\n    a   =   b\n</script>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps the content of scripts that fail to format', async () => {
+		const input = '<script>let x = ;  foo( 1 )</script>\n';
+		const expectedOutput = '<script>\n    let x = ;  foo( 1 )\n</script>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps errors that Prettier throws as the cause', async () => {
+		const error = new Error('foo');
+		const pluginThrowingHTML = {
+			parsers: {
+				html: {
+					astFormat: 'html',
+					locEnd: () => 0,
+					locStart: () => 0,
+					parse: () => {
+						throw error;
+					},
+				},
+			},
+		} satisfies Plugin;
+		let result: unknown;
+
+		try {
+			await format('<div   >foo</div>\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				plugins: [pluginMarkdownHTML, pluginThrowingHTML],
+			});
+		} catch (caughtError) {
+			result = caughtError;
+		}
+
+		expect(result).toBeInstanceOf(Error);
+		expect((result as Error).message).toMatchInlineSnapshot(`
+			"[prettier-plugin-markdown-html] Failed to format HTML with Prettier (1:1):
+
+			foo"
+		`);
+		expect((result as Error).cause).toBe(error);
+	});
+});
+
 describe('Ignore Directives', () => {
 	test('keeps omitted closing tags of elements that ignore directives protect', async () => {
 		const input =
@@ -2663,6 +3080,448 @@ describe('Ignore Directives', () => {
 		);
 	});
 
+	test('keeps omitted closing tags of elements that Markdown ignore directives protect', async () => {
+		const input =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\n<li>bar\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\n<li>bar</li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags of elements that Markdown ignore directives protect around Markdown', async () => {
+		const input =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\nbaz\n\n<li>bar\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\nbaz\n\n<li>bar</li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags of nested elements that Markdown ignore directives protect', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n<ul><li><p>\n\n<li>bar\n</ul>\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\n<ul><li><p>\n\n<li>bar</li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags of elements that Markdown ignore directives protect around open elements', async () => {
+		const input =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\n<p>bar\n<li>baz\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\n<p>\n            bar\n            <li>baz</li>\n        </p>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags of elements that Markdown ignore directives protect inside later fragments', async () => {
+		const input =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\n<p   >x</p>\n<li   >bar\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\n<p>x</p>\n    <li>bar</li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps the closing tags of custom elements that ignore directives protect', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n<Foo-Bar   >\n\nbaz\n\n</Foo-Bar>\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps the closing tags of elements with uppercase names that HTML ignore directives protect', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n<div>\n<!-- prettier-ignore -->\n<DIV>\n\nfoo\n\n</DIV>\n</div>\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps the closing tags of SVG elements that ignore directives protect', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n<div><svg><linearGradient>\n\nfoo\n\n</linearGradient>\n</svg>\n</div>\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\n<div><svg><linearGradient>\n\nfoo\n\n</linearGradient>\n    </svg>\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects opening tags that formatting would lowercase before uppercase closing tags that ignore directives protect', async () => {
+		await expect(
+			format(
+				'<DIV>\n\nfoo\n\n<!-- prettier-ignore -->\n</DIV>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would give this \`<DIV>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('adds no closing tags inside elements that HTML ignore directives protect', async () => {
+		const input =
+			'<ul>\n<!-- prettier-ignore -->\n<li   ><p>foo\n\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n    <!-- prettier-ignore -->\n    <li   ><p>foo\n\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects closing tags that formatting would lowercase after uppercase opening tags that ignore directives protect', async () => {
+		await expect(
+			format(
+				'<!-- prettier-ignore -->\n<DIV   >\n\nfoo\n\n</DIV>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (2:1):
+
+			Formatting would give this \`<DIV>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('rejects inline closing tags that formatting would lowercase after uppercase inline opening tags that ignore directives protect', async () => {
+		await expect(
+			format(
+				'- <!-- prettier-ignore -->\n  foo <SPAN>\n  <!-- bar -->\n  baz </SPAN>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (2:7):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('rejects inline opening tags that formatting would lowercase before uppercase inline closing tags that ignore directives protect', async () => {
+		await expect(
+			format(
+				'- foo <SPAN>\n  <!-- bar -->\n  <!-- prettier-ignore -->\n  baz </SPAN>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:7):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('rejects inline opening tags that formatting would lowercase before uppercase closing tags in HTML blocks that ignore directives protect', async () => {
+		await expect(
+			format(
+				'- foo <Span>\n  <!-- prettier-ignore -->\n  <p   >bar\n  baz </Span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:7):
+
+			Formatting would give this \`<Span>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('rejects inline SVG closing tags that formatting would lowercase after opening tags that ignore directives protect', async () => {
+		await expect(
+			format(
+				'- <!-- prettier-ignore -->\n  foo <svg><A>\n  <!-- bar -->\n  baz </A></svg>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (2:12):
+
+			Formatting would give this \`<A>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('keeps inline tags in preformatted content when ignore directives protect only one of them', async () => {
+		const input =
+			'<div><pre>\n\n- <!-- prettier-ignore -->\n    foo <B>\n  <!-- bar -->\n    baz </B>\n\n</pre>\n</div>\n';
+		const expectedOutput =
+			'<div>\n    <pre>\n\n- <!-- prettier-ignore -->\n    foo <B>\n  <!-- bar -->\n    baz </B>\n\n</pre>\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps both tags of uppercase elements that ignore directives protect in HTML blocks and inline HTML', async () => {
+		const input =
+			'- <!-- prettier-ignore -->\n  <!-- foo --><SPAN>\n  <!-- prettier-ignore -->\n  bar </SPAN>\n';
+		const expectedOutput =
+			'- <!-- prettier-ignore -->\n  <!-- foo --><SPAN>\n  <!-- prettier-ignore -->\n    bar </SPAN>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps inline tags with lowercase names when ignore directives protect only one of them', async () => {
+		const input =
+			'- <!-- prettier-ignore -->\n  foo <span>\n  <!-- bar -->\n  baz </span>\n';
+		const expectedOutput =
+			'- <!-- prettier-ignore -->\n    foo <span>\n  <!-- bar -->\n    baz </span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects uppercase opening tags that Prettier lowercases after HTML ignore directives without whitespace', async () => {
+		await expect(
+			format(
+				'<div><!-- prettier-ignore --><SPAN   >foo</SPAN></div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('rejects uppercase opening tags that Prettier lowercases after HTML ignore directives without whitespace beside identical protected tags', async () => {
+		await expect(
+			format(
+				'<div><!-- prettier-ignore --><SPAN   >foo</SPAN><!-- prettier-ignore --> <SPAN   >bar</SPAN></div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('rejects uppercase opening tags that Prettier lowercases after HTML ignore directives without whitespace beside copies in comments', async () => {
+		await expect(
+			format(
+				'<div><!-- prettier-ignore --><SPAN   >foo</SPAN><!-- <SPAN   > --></div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('keeps uppercase opening tags after HTML ignore directives with whitespace beside Markdown-ignored copies', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n<div><!-- prettier-ignore --><SPAN   >foo</SPAN></div>\n\n<div><!-- prettier-ignore --> <SPAN   >bar</SPAN></div>\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\n<div><!-- prettier-ignore --><SPAN   >foo</SPAN></div>\n\n<div>\n    <!-- prettier-ignore -->\n    <SPAN   >bar</SPAN>\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps uppercase opening tags in preformatted content after HTML ignore directives without whitespace beside lowercase copies', async () => {
+		const input =
+			'<pre><!-- prettier-ignore --><SPAN   >foo</SPAN></pre>\n\n<div><!-- prettier-ignore --><span   >bar</span></div>\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('rejects uppercase opening tags that Prettier lowercases after HTML ignore directives without whitespace beside copies in attributes', async () => {
+		await expect(
+			format(
+				'<div class="<!-- prettier-ignore --><span   >"><!-- prettier-ignore --><SPAN   >foo</SPAN></div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('keeps uppercase opening tags in preformatted content after HTML ignore directives without whitespace beside Markdown-ignored copies', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n<div><!-- prettier-ignore --><SPAN   >foo</SPAN></div>\n\n<pre><!-- prettier-ignore --><SPAN   >bar</SPAN></pre>\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps uppercase opening tags in preformatted content after HTML ignore directives without whitespace beside protected inline closing tags', async () => {
+		const input =
+			'- <!-- prettier-ignore -->\n  <!-- foo --><SPAN>\n  <!-- prettier-ignore -->\n  bar </SPAN>\n  <pre><!-- prettier-ignore --><B   >baz</B></pre>\n';
+		const expectedOutput =
+			'- <!-- prettier-ignore -->\n  <!-- foo --><SPAN>\n  <!-- prettier-ignore -->\n    bar </SPAN>\n  <pre><!-- prettier-ignore --><B   >baz</B></pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps uppercase opening tags in preformatted content after HTML ignore directives without whitespace beside elements that inline HTML opens', async () => {
+		const input =
+			'- foo <SPAN>\n  <div   >bar</div>\n  </SPAN>\n  <pre><!-- prettier-ignore --><B   >baz</B></pre>\n';
+		const expectedOutput =
+			'- foo <span>\n  <div>bar</div>\n  </span>\n  <pre><!-- prettier-ignore --><B   >baz</B></pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects uppercase opening tags that Prettier lowercases after HTML ignore directives without whitespace when it breaks the line after them', async () => {
+		await expect(
+			format(
+				`<div><!-- prettier-ignore --><SPAN   >foo</SPAN><b>${'bar '.repeat(20)}</b></div>\n`,
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('rejects uppercase opening tags that Prettier lowercases after HTML ignore directives without whitespace beside renamed copies in attributes', async () => {
+		await expect(
+			format(
+				'<div class="<!-- prettier-ignore --><span   >foo</SPAN>"><!-- prettier-ignore --><SPAN   >foo</SPAN></div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('keeps void elements that Prettier lowercases after HTML ignore directives without whitespace beside protected uppercase elements', async () => {
+		const input =
+			'<div><!-- prettier-ignore --><IMG   src="foo"><section><!-- prettier-ignore --><DIV   >bar</DIV></section></div>\n';
+		const expectedOutput =
+			'<div>\n    <!-- prettier-ignore --><img   src="foo">\n    <section>\n        <!-- prettier-ignore -->\n        <DIV   >bar</DIV>\n    </section>\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects uppercase opening tags that Prettier lowercases after HTML ignore directives without whitespace after self-closing preformatted elements', async () => {
+		await expect(
+			format(
+				'<div><pre /><!-- prettier-ignore --><SPAN   >foo</SPAN></div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would give this \`<SPAN>\` element different opening and closing tag names, which Prettier’s HTML parser would not match]
+		`);
+	});
+
+	test('keeps void elements that Prettier lowercases after HTML ignore directives without whitespace beside protected uppercase elements in preformatted content', async () => {
+		const input =
+			'<div><pre><!-- prettier-ignore --><SPAN   >foo</SPAN></pre><!-- prettier-ignore --><IMG   src="bar"></div>\n';
+		const expectedOutput =
+			'<div>\n    <pre><!-- prettier-ignore --><SPAN   >foo</SPAN></pre>\n    <!-- prettier-ignore --><img   src="bar">\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags of ignored elements with uppercase names', async () => {
+		const input =
+			'<UL>\n\n<!-- prettier-ignore -->\n<LI   >foo\n\n<LI>bar\n</UL>\n';
+		const expectedOutput =
+			'<ul>\n\n<!-- prettier-ignore -->\n<LI   >foo\n\n<li>bar</li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags of elements that range ignore directives protect', async () => {
+		const input =
+			'<ul>\n\n<!-- prettier-ignore-start -->\n\n<li   >foo\n\n<!-- prettier-ignore-end -->\n\n<li>bar\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<!-- prettier-ignore-start -->\n\n<li   >foo\n\n<!-- prettier-ignore-end -->\n\n<li>bar</li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags of elements that range ignore directives protect before closing tags', async () => {
+		const input =
+			'<ul>\n\n<!-- prettier-ignore-start -->\n\n<li   >foo\n\n<!-- prettier-ignore-end -->\n\n</ul>\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
 	test('rejects closing elements around ignored elements with omitted closing tags', async () => {
 		await expect(
 			format(
@@ -2673,6 +3532,170 @@ describe('Ignore Directives', () => {
 			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
 
 			The \`<div>\` element can’t close because an ignore directive prevents adding a closing tag to the \`<div>\` element inside it]
+		`);
+	});
+
+	test('keeps omitted closing tags of ignored elements inside ignored elements with the same names', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n<ul><p>foo\n\n<!-- prettier-ignore -->\n<li><p>bar\n\n<div   >baz</div>\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\n<ul><p>foo\n\n<!-- prettier-ignore -->\n<li><p>bar\n\n<div>baz</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('closes elements around ignored elements whose omitted closing tags their closing tags imply', async () => {
+		const input =
+			'<ul>\n\n<li>bar\n\n<!-- prettier-ignore -->\n<p   >baz\n\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<li>\n        bar\n\n<!-- prettier-ignore -->\n<p   >baz\n\n</li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('closes elements around ignored fragments before later closing tags', async () => {
+		const input =
+			'<ul>\n\n<li>foo\n\n<!-- prettier-ignore -->\n<div   >qux</div>\n\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<li>\n        foo\n\n<!-- prettier-ignore -->\n<div   >qux</div>\n\n</li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags of ignored elements that close after comments with trailing whitespace', async () => {
+		const input =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\n<p>bar\n\n<!-- baz -->   \n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<!-- prettier-ignore -->\n<li   >foo\n\n<p>\n            bar\n\n<!-- baz -->\n</p>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('closes elements that Markdown after ignored fragments closes', async () => {
+		const input =
+			'<div>\n<p>foo\n\n<!-- prettier-ignore -->\n<span   >\nbar</span>\n\nbaz\n\n</div>\n';
+		const expectedOutput =
+			'<div>\n    <p>\n        foo\n\n<!-- prettier-ignore -->\n<span   >\nbar</span>\n\n</p>\n\nbaz\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('separates closing tags after ignored fragments from Liquid tags', async () => {
+		const input =
+			'<div>\n<p>foo\n\n<!-- prettier-ignore -->\n<style   >a{}</style>\n{% baz %}\n\n</div>\n';
+		const expectedOutput =
+			'<div>\n    <p>\n        foo\n\n<!-- prettier-ignore -->\n<style   >a{}</style>\n\n</p>\n\n{% baz %}\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects closing tags after ignored fragments that would take in Markdown', async () => {
+		await expect(
+			format(
+				'- foo <p>bar\n  <!-- prettier-ignore -->\n  <style   >a{}</style>\n  # baz\n- qux\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (3:3):
+
+			After formatting, the block formed by closing tags after this HTML block would remain open in GitHub Flavored Markdown and include the Markdown that follows]
+		`);
+	});
+
+	test('closes elements around ignored elements at the end of the document', async () => {
+		const input = '<div   >\n\n<!-- prettier-ignore -->\n<p   >foo\n';
+		const expectedOutput =
+			'<div>\n\n<!-- prettier-ignore -->\n<p   >foo\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('closes elements with the same names as ignored elements that close first', async () => {
+		const input =
+			'<ul>\n<li>foo\n<ul>\n\n<!-- prettier-ignore -->\n<li   >bar\n\n</ul>\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n    <li>\n        foo\n        <ul>\n\n<!-- prettier-ignore -->\n<li   >bar\n\n</ul>\n    </li>\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('closes elements with the same names as ignored elements that later elements close', async () => {
+		const input =
+			'<ul>\n\n<p>foo\n\n<!-- prettier-ignore -->\n<li   >bar\n<p   >baz\n\n<p>qux\n\n</ul>\n';
+		const expectedOutput =
+			'<ul>\n\n<p>\n        foo\n\n<!-- prettier-ignore -->\n<li   >bar\n<p   >baz\n\n<p>qux</p>\n    </p>\n\n</ul>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects closing elements with the same names as ignored elements with omitted closing tags', async () => {
+		await expect(
+			format(
+				'<ul>\n\n<p>foo\n\n<!-- prettier-ignore -->\n<li   >bar\n<p   >baz\n\n<li>qux\n</ul>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (3:1):
+
+			The \`<p>\` element can’t close because an ignore directive prevents adding a closing tag to the \`<p>\` element inside it]
+		`);
+	});
+
+	test('rejects closing tags that would join Markdown ignore directives', async () => {
+		await expect(
+			format(
+				'<ul>\n\n<p>foo\n\n<li>bar\n<p>baz\n\n<!-- prettier-ignore -->\n<div   >qux</div>\n\n</ul>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (8:1):
+
+			After formatting, this Prettier ignore comment would share its HTML block with other HTML, so Prettier would no longer recognize it]
 		`);
 	});
 
@@ -2757,6 +3780,553 @@ describe('Ignore Directives', () => {
 			output
 		);
 	});
+
+	test('formats fragments after opening tags that Markdown ignore directives protect', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n<div   >\n\nfoo\n\n<p   >bar</p>\n\n</div   >\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\n<div   >\n\nfoo\n\n<p>bar</p>\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps blank lines that end ignored open preformatted content', async () => {
+		const input = '<!-- prettier-ignore -->\n<pre>\nx\n\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps trailing whitespace that ends ignored preformatted content', async () => {
+		const input = '<!-- prettier-ignore -->\n<pre>foo  \n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps trailing whitespace of ignored fragments inside text areas', async () => {
+		const input =
+			'<div><textarea>\n\n<!-- prettier-ignore -->\n<p   >foo  \n\n</textarea>\n</div>\n';
+		const expectedOutput =
+			'<div>\n    <textarea>\n\n<!-- prettier-ignore -->\n<p   >foo  \n\n</textarea>\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats HTML after ignore comments with trailing whitespace that Prettier doesn’t honor', async () => {
+		const input =
+			'<!-- prettier-ignore -->   \n<div   >\n\nfoo\n\n<p   >bar</p>\n\n</div   >\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\n<div>\n\nfoo\n\n<p>bar</p>\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps ignored preformatted content after list item prefixes that change', async () => {
+		const input =
+			'-   <!-- prettier-ignore -->\n    <pre   >\n    a  \n      \n    b</pre>\n';
+		const expectedOutput =
+			'- <!-- prettier-ignore -->\n  <pre   >\n  a  \n    \n  b</pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps the indentation of ignored HTML after list item prefixes that change', async () => {
+		const input =
+			'*   foo\n\n    <!-- prettier-ignore -->\n    <div   id = "a">\n      bar</div>\n';
+		const expectedOutput =
+			'- foo\n\n  <!-- prettier-ignore -->\n  <div   id = "a">\n    bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps ignored preformatted content after block quote prefixes that change', async () => {
+		const input =
+			'>foo\n>\n><!-- prettier-ignore -->\n><pre   >\n>x\n>\n>  y</pre>\n';
+		const expectedOutput =
+			'> foo\n>\n> <!-- prettier-ignore -->\n> <pre   >\n> x\n>\n>  y</pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps ignored HTML in footnote definitions unchanged', async () => {
+		const input =
+			'[^1]: foo\n\n    <!-- prettier-ignore -->\n    <pre>\n      x\n    </pre>\n\nbar[^1]\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps preformatted content in ignored lists after list item prefixes that change', async () => {
+		const input =
+			'-    -    <!-- prettier-ignore -->\n          - <pre   >\n              a\n              </pre>\n';
+		const expectedOutput =
+			'-   - <!-- prettier-ignore -->\n        - <pre   >\n            a\n            </pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps ignored lists with HTML in block quotes unchanged', async () => {
+		const input =
+			'> <!-- prettier-ignore -->\n> - <div>foo</div>\n>\n> bar\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps code blocks that end ignored lists with HTML in block quotes unchanged', async () => {
+		const input =
+			'> <!-- prettier-ignore -->\n> - <div>foo</div>\n>\n>   ```\n>   bar\n>\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('removes whitespace from the blank line after ignored lists with HTML in block quotes', async () => {
+		const input =
+			'> <!-- prettier-ignore -->\n> - <div>foo</div>\n>   \n> bar\n';
+		const expectedOutput =
+			'> <!-- prettier-ignore -->\n> - <div>foo</div>\n>\n> bar\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps trailing whitespace of ignored HTML at the end of block quotes', async () => {
+		const input = '> <!-- prettier-ignore -->\n> <div>foo</div>  \n\nbar\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps links with inline HTML that ignore directives protect unchanged', async () => {
+		const input =
+			'<!-- prettier-ignore -->\n[<b>foo</b>](https://example.com)\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('keeps preformatted content that ignore directives protect in list items whose marker lines end after the marker', async () => {
+		const input =
+			'-\n  <!-- prettier-ignore -->\n  <pre>\n  foo\n  </pre>\n';
+		const expectedOutput =
+			'- <!-- prettier-ignore -->\n  <pre>\n  foo\n  </pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps preformatted content in ignored lists that end with text after list item prefixes that change', async () => {
+		const input =
+			'-    -    <!-- prettier-ignore -->\n          - <pre>\n              foo\n              </pre>\n          - bar\n';
+		const expectedOutput =
+			'-   - <!-- prettier-ignore -->\n        - <pre>\n            foo\n            </pre>\n        - bar\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps tabs in ignored preformatted content after list item prefixes that change', async () => {
+		const input = '-\t<!-- prettier-ignore -->\n\t<pre>\n\t\tx</pre>\n';
+		const expectedOutput =
+			'- <!-- prettier-ignore -->\n  <pre>\n  \tx</pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps the columns of partly covered tabs in ignored preformatted content', async () => {
+		const input =
+			'- foo\n\n  <!-- prettier-ignore -->\n  <pre>\n\t x</pre>\n';
+		const expectedOutput =
+			'- foo\n\n  <!-- prettier-ignore -->\n  <pre>\n     x</pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps ignored preformatted content after task list item prefixes that change', async () => {
+		const input =
+			'-   [ ] foo\n\n    <!-- prettier-ignore -->\n    <pre   >\n      x</pre>\n';
+		const expectedOutput =
+			'- [ ] foo\n\n  <!-- prettier-ignore -->\n  <pre   >\n    x</pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('protects only the attributes that a named attribute ignore directive selects', async () => {
+		const input =
+			'<!-- prettier-ignore-attribute style -->\n<div   style="a:b;c:d"   class = "x">bar</div>\n';
+		const expectedOutput =
+			'<!-- prettier-ignore-attribute style -->\n<div style="a:b;c:d" class="x">bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('completes elements whose attributes ignore directives protect', async () => {
+		const input =
+			'<!-- prettier-ignore-attribute -->\n<div   title = "foo">\n\nbar\n';
+		const expectedOutput =
+			'<!-- prettier-ignore-attribute -->\n<div title = "foo">\n\nbar\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps omitted closing tags at the end of the document for elements that Markdown ignore directives protect', async () => {
+		const input = '<!-- prettier-ignore -->\n<div   >\n\nfoo\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('formats fragments inside elements whose opening tags range ignore directives protect', async () => {
+		const input =
+			'<!-- prettier-ignore-start -->\n\n<div   >\n\n<!-- prettier-ignore-end -->\n\n<p   >foo</p>\n\n</div   >\n';
+		const expectedOutput =
+			'<!-- prettier-ignore-start -->\n\n<div   >\n\n<!-- prettier-ignore-end -->\n\n<p>foo</p>\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects invalid HTML that Markdown ignore directives protect', async () => {
+		await expect(
+			format(
+				'<!-- prettier-ignore -->\n<div><p></div></p>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (2:15):
+
+			Unexpected closing tag "p". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags]
+		`);
+	});
+
+	test('rejects invalid HTML that range ignore directives protect', async () => {
+		await expect(
+			format(
+				'<!-- prettier-ignore-start -->\n\n<div><span></div>\n\n<!-- prettier-ignore-end -->\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (3:12):
+
+			This \`</div>\` tag doesn’t match the \`<span>\` element that is still open]
+		`);
+	});
+
+	test('normalizes line endings in protected HTML', async () => {
+		const input =
+			'<!-- prettier-ignore -->\r\n<div   >\r\n  foo</div>\r\n\r\n<pre>\r\nbar\r\n</pre>\r\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\n<div   >\n  foo</div>\n\n<pre>\nbar\n</pre>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('applies the selected line endings to protected HTML', async () => {
+		const input = '<!-- prettier-ignore -->\n<div   >\n  foo</div>\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\r\n<div   >\r\n  foo</div>\r\n';
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			endOfLine: 'crlf',
+		} satisfies Options;
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('skips validation in files without a required pragma', async () => {
+		const input = '<div><p></div></p>\n';
+
+		await expect(
+			format(input, { ...SPEC_EXAMPLE_OPTIONS, requirePragma: true })
+		).resolves.toBe(input);
+	});
+
+	test('skips validation in files with an ignore pragma', async () => {
+		const input = '<!-- @noformat -->\n\n<div><p></div></p>\n';
+
+		await expect(
+			format(input, { ...SPEC_EXAMPLE_OPTIONS, checkIgnorePragma: true })
+		).resolves.toBe(input);
+	});
+
+	test('validates files with a required pragma', async () => {
+		await expect(
+			format('<!-- @format -->\n\n<div><p></div></p>\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				requirePragma: true,
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (3:15):
+
+			Unexpected closing tag "p". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags]
+		`);
+	});
+
+	test('applies pragmas to the Markdown document rather than to fragments', async () => {
+		const input = 'foo\n\n<!-- @noformat --><div   id = "a">bar</div>\n';
+		const expectedOutput =
+			'foo\n\n<!-- @noformat -->\n<div id="a">bar</div>\n';
+		const options = { ...SPEC_EXAMPLE_OPTIONS, checkIgnorePragma: true };
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+});
+
+describe('Range Formatting', () => {
+	test('returns accepted input unchanged when Prettier makes no edits in the range', async () => {
+		const input = '<div   >foo</div>\n\n<div   >bar</div>\n';
+
+		await expect(
+			format(input, {
+				...SPEC_EXAMPLE_OPTIONS,
+				rangeEnd: 5,
+				rangeStart: 0,
+			})
+		).resolves.toBe(input);
+	});
+
+	test('returns accepted input unchanged when Prettier makes no edits in the range with the remark parser', async () => {
+		const input = '<div   >foo</div>\n\n<div   >bar</div>\n';
+
+		await expect(
+			format(input, {
+				...SPEC_EXAMPLE_OPTIONS,
+				parser: 'remark',
+				rangeEnd: 5,
+				rangeStart: 0,
+			})
+		).resolves.toBe(input);
+	});
+
+	test('returns accepted input unchanged when formatting the complete document would report an error', async () => {
+		const input =
+			'foo\n\n<div>\n<script type="text/markdown">\n# foo\n* bar\n</script>\n</div>\n';
+
+		await expect(
+			format(input, {
+				...SPEC_EXAMPLE_OPTIONS,
+				rangeEnd: 3,
+				rangeStart: 0,
+			})
+		).resolves.toBe(input);
+	});
+
+	test('returns accepted input unchanged when formatting would change protected content outside the range', async () => {
+		const input =
+			'foo\n\n<div><pre>\n\nfoo  bar\n\n<div></div></pre></div>\n';
+
+		await expect(
+			format(input, {
+				...SPEC_EXAMPLE_OPTIONS,
+				rangeEnd: 3,
+				rangeStart: 0,
+			})
+		).resolves.toBe(input);
+	});
+
+	test('rejects invalid HTML outside the range', async () => {
+		const message = await getUncoloredErrorMessage(
+			format('foo\n\n<div><p></div></p>\n\nbar\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				rangeEnd: 3,
+				rangeStart: 0,
+			})
+		);
+
+		expect(message).toMatchInlineSnapshot(`
+			"[prettier-plugin-markdown-html] Invalid HTML (3:15):
+
+			Unexpected closing tag "p". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags
+			  1 | foo
+			  2 |
+			> 3 | <div><p></div></p>
+			    |               ^
+			  4 |
+			  5 | bar
+			  6 |"
+		`);
+	});
+
+	test('rejects invalid HTML outside the range after parser preprocessing shortens the text', async () => {
+		const pluginShorteningText = {
+			parsers: {
+				markdown: {
+					...markdownParsers.markdown,
+					preprocess: (text: string) => text.replace('qux', ''),
+				},
+			},
+		} satisfies Plugin;
+		const input = 'foo\n\n<div><p></div></p>\n\nbar qux\n';
+
+		const message = await getUncoloredErrorMessage(
+			format(input, {
+				...SPEC_EXAMPLE_OPTIONS,
+				plugins: [pluginShorteningText, pluginMarkdownHTML],
+				rangeEnd: input.length - 2,
+				rangeStart: 0,
+			})
+		);
+
+		expect(message).toMatchInlineSnapshot(`
+			"[prettier-plugin-markdown-html] Invalid HTML (3:15):
+
+			Unexpected closing tag "p". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags
+			  1 | foo
+			  2 |
+			> 3 | <div><p></div></p>
+			    |               ^
+			  4 |
+			  5 | bar qux
+			  6 |"
+		`);
+	});
+
+	test('rejects invalid HTML before the range', async () => {
+		const message = await getUncoloredErrorMessage(
+			format('<div><p></div></p>\n\nfoo\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				rangeStart: 20,
+			})
+		);
+
+		expect(message).toMatchInlineSnapshot(`
+			"[prettier-plugin-markdown-html] Invalid HTML (1:15):
+
+			Unexpected closing tag "p". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags
+			> 1 | <div><p></div></p>
+			    |               ^
+			  2 |
+			  3 | foo
+			  4 |"
+		`);
+	});
+
+	test('rejects HTML blocks that only Prettier reads outside the range', async () => {
+		const message = await getUncoloredErrorMessage(
+			format('baz\n\nfoo\n<search>\nbar\n</search>\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				rangeEnd: 3,
+				rangeStart: 0,
+			})
+		);
+
+		expect(message).toMatchInlineSnapshot(`
+			"[prettier-plugin-markdown-html] Unsupported Markdown (4:1):
+
+			Prettier’s Markdown parser starts an HTML block here, but GitHub Flavored Markdown continues the paragraph above
+			  2 |
+			  3 | foo
+			> 4 | <search>
+			    | ^
+			  5 | bar
+			  6 | </search>
+			  7 |"
+		`);
+	});
+
+	test('rejects raw HTML that only the reference renderer reads outside the range', async () => {
+		const message = await getUncoloredErrorMessage(
+			format('foo\n\n$$\n<span>\n$$\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				rangeEnd: 3,
+				rangeStart: 0,
+			})
+		);
+
+		expect(message).toMatchInlineSnapshot(`
+			"[prettier-plugin-markdown-html] Unsupported Markdown (3:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown recognizes raw HTML within it
+			  1 | foo
+			  2 |
+			> 3 | $$
+			    | ^
+			  4 | <span>
+			  5 | $$
+			  6 |"
+		`);
+	});
 });
 
 describe('Output and Errors', () => {
@@ -2771,5 +4341,113 @@ describe('Output and Errors', () => {
 
 			This \`</div>\` tag doesn’t match the \`<span>\` element that is still open]
 		`);
+	});
+
+	test('adds a final newline after HTML', async () => {
+		const input = '<div   >foo</div>';
+		const expectedOutput = '<div>foo</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('removes blank lines at the end of the document after HTML', async () => {
+		const input = '<div   >foo</div>\n\n\n\n';
+		const expectedOutput = '<div>foo</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('removes blank lines at the end of the document after HTML in list items', async () => {
+		const input = '- <div   >foo\n  </div>\n\n\n';
+		const expectedOutput = '- <div>foo</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps text that looks like internal markers', async () => {
+		const input =
+			'<div data-prettier-markdown-html-1>\n\nfoo\n\n<p   >x</p>\n\n</div>\n';
+		const expectedOutput =
+			'<div data-prettier-markdown-html-1>\n\nfoo\n\n<p>x</p>\n\n</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('reports positions in the original Markdown after frontmatter', async () => {
+		await expect(
+			format(
+				'---\na: b\n---\n\n<div><p></div></p>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (5:15):
+
+			Unexpected closing tag "p". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags]
+		`);
+	});
+
+	test('reports positions in the original Markdown with CRLF line endings', async () => {
+		await expect(
+			format('foo\r\n\r\n<div>\r\n<span></div>\r\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (4:7):
+
+			This \`</div>\` tag doesn’t match the \`<span>\` element that is still open]
+		`);
+	});
+});
+
+describe('Prettier Compatibility', () => {
+	test('formats HTML blocks at the document root as Prettier formats HTML', async () => {
+		const input =
+			'<div   id = "a" class="b c"><p>foo <b>bar</b>   baz</p><ul><li>x<li>y</ul></div>\n';
+		const expectedOutput = await format(input, {
+			parser: 'html',
+			printWidth: 80,
+			tabWidth: 4,
+		});
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+});
+
+describe('Stability', () => {
+	test('formats documents without depending on earlier calls', async () => {
+		const input = '- <div   >foo\n  <p   >bar</p></div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+		await format('> <span   >baz</span>\n', {
+			...SPEC_EXAMPLE_OPTIONS,
+			parser: 'remark',
+			tabWidth: 2,
+			useTabs: true,
+		});
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(output);
 	});
 });

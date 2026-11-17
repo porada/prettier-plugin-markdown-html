@@ -77,7 +77,14 @@ export default async function analyzeDocumentContext(
 		protectedRanges
 	);
 
+	const inlineClosingTags = collectInlineClosingTags(
+		context,
+		elementsByStart
+	);
+
 	return {
+		inlineClosingTagsByContainer: inlineClosingTags.byContainer,
+		inlineClosingTagsByFragment: inlineClosingTags.byFragment,
 		inlineOpenersByFragment: collectInlineOpeners(context, root),
 		opaqueContainers: new Set(
 			[...context.containers]
@@ -90,11 +97,6 @@ export default async function analyzeDocumentContext(
 		),
 		protectedEnds: collectFragmentsAt(context, protectedRanges, 'end'),
 		protectedMarkdown: collectProtectedMarkdown(context, protectedRanges),
-		readingContainers: collectReadingContainers(
-			context,
-			root,
-			generatedStarts
-		),
 		protectedRanges: protectedRanges.map(({ description, end, start }) => ({
 			description,
 			end,
@@ -102,6 +104,16 @@ export default async function analyzeDocumentContext(
 		})),
 		protectedStarts: collectFragmentsAt(context, protectedRanges, 'start'),
 		rawAncestorsByContainer: collectRawAncestors(context, elementsByStart),
+		readingContainers: collectReadingContainers(
+			context,
+			root,
+			generatedStarts
+		),
+		splitElements: collectSplitElements(
+			context,
+			elementsByStart,
+			protectedRanges
+		),
 	};
 }
 
@@ -538,14 +550,6 @@ function collectInlineOpeners(
 			openersByFragment.set(
 				fragment.node,
 				openers.map((element) => ({
-					isClosedInline: context.fragments.some(
-						({ end, isBlock, start }) =>
-							!isBlock &&
-							element.endSourceSpan !== undefined &&
-							element.endSourceSpan !== null &&
-							start <= element.endSourceSpan.start.offset &&
-							element.endSourceSpan.start.offset < end
-					),
 					name:
 						/^<([^\s/>]+)/.exec(
 							context.html.slice(element.sourceSpan.start.offset)
@@ -557,6 +561,142 @@ function collectInlineOpeners(
 	}
 
 	return openersByFragment;
+}
+
+/**
+ * Lists inline closing tags that close elements open in a container’s skeleton,
+ * where markers stand in for Markdown between HTML blocks. These elements
+ * opened in or before an earlier HTML block of the container. Tags are in
+ * document order, keyed by the next HTML block or by the container when no HTML
+ * block follows.
+ */
+function collectInlineClosingTags(
+	context: AST.DocumentContext,
+	elementsByStart: ReadonlyMap<number, HTMLNode>
+): {
+	byContainer: Map<AST.Node, string[]>;
+	byFragment: Map<AST.HTMLNode, string[]>;
+} {
+	const closings = [...elementsByStart]
+		.flatMap(([start, element]) => {
+			const offset = element.endSourceSpan?.start.offset;
+			const isInline =
+				offset !== undefined &&
+				context.fragments.some(
+					(fragment) =>
+						!fragment.isBlock &&
+						fragment.start <= offset &&
+						offset < fragment.end
+				);
+
+			return isInline
+				? [
+						{
+							offset,
+							start,
+							tag:
+								/^<\/[^\s/>]+/.exec(
+									context.html.slice(offset)
+								)?.[0] ?? '',
+						},
+					]
+				: [];
+		})
+		.toSorted((first, second) => first.offset - second.offset);
+	const blocksByContainer = new Map<AST.Node, AST.Fragment[]>();
+
+	for (const fragment of context.fragments) {
+		if (fragment.isBlock) {
+			blocksByContainer.set(fragment.parent, [
+				...(blocksByContainer.get(fragment.parent) ?? []),
+				fragment,
+			]);
+		}
+	}
+
+	const byContainer = new Map<AST.Node, string[]>();
+	const byFragment = new Map<AST.HTMLNode, string[]>();
+
+	for (const [container, blocks] of blocksByContainer) {
+		const generated = context.containers.get(container);
+		const containerStart = generated?.openEnd ?? 0;
+		const containerEnd = generated?.closeStart ?? context.html.length;
+
+		for (const [index, previous] of blocks.entries()) {
+			const next = blocks[index + 1];
+			const end = next?.start ?? containerEnd;
+			const tags = closings
+				.filter(
+					({ offset, start }) =>
+						previous.end <= offset &&
+						offset < end &&
+						containerStart <= start &&
+						start < previous.end
+				)
+				.map(({ tag }) => `${tag}>`);
+
+			if (tags.length === 0) {
+				continue;
+			}
+
+			if (next) {
+				byFragment.set(next.node, tags);
+			} else {
+				byContainer.set(container, tags);
+			}
+		}
+	}
+
+	return { byContainer, byFragment };
+}
+
+/**
+ * Lists the elements whose opening and closing tags are in different fragments,
+ * at least one of them inline. Inline fragments are formatted apart from the
+ * HTML blocks of their container.
+ */
+function collectSplitElements(
+	context: AST.DocumentContext,
+	elementsByStart: ReadonlyMap<number, HTMLNode>,
+	protectedRanges: ReadonlyArray<OffsetRange>
+): AST.SplitElement[] {
+	const findFragment = (offset: number): AST.Fragment | undefined =>
+		context.fragments.find(
+			({ end, start }) => start <= offset && offset < end
+		);
+	const elements: AST.SplitElement[] = [];
+
+	for (const [start, element] of elementsByStart) {
+		// Prettier keeps both tags of elements in preformatted content
+		if (
+			!element.endSourceSpan ||
+			protectedRanges.some(
+				(range) => range.start <= start && start < range.end
+			)
+		) {
+			continue;
+		}
+
+		const opening = findFragment(start);
+		const closing = findFragment(element.endSourceSpan.start.offset);
+
+		if (
+			opening &&
+			closing &&
+			opening !== closing &&
+			!(opening.isBlock && closing.isBlock)
+		) {
+			elements.push({
+				closing,
+				name: element.name ?? '',
+				opening,
+				sourceName:
+					/^<([^\s/>]+)/.exec(context.html.slice(start))?.[1] ?? '',
+			});
+		}
+	}
+
+	return elements;
 }
 
 /**

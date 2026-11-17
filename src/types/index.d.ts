@@ -111,6 +111,9 @@ export namespace AST {
 		endsOpenBlocks: boolean;
 		formattedNodes: WeakSet<Node>;
 		ignoredNodes: ReadonlySet<Node>;
+		// Closing tags in inline HTML before each HTML block that close
+		// elements open in the skeleton, in document order
+		inlineClosingTags: ReadonlyMap<HTMLNode, string[]>;
 		// Raw elements that inline HTML opened before each HTML block and left
 		// open, outermost first
 		inlineOpeners: ReadonlyMap<HTMLNode, InlineOpener[]>;
@@ -125,6 +128,9 @@ export namespace AST {
 		prefixWidth: number;
 		protectedEnds: ReadonlySet<HTMLNode>;
 		protectedStarts: ReadonlySet<HTMLNode>;
+		// Closing tags in inline HTML after the last HTML block that close
+		// elements open in the skeleton, in document order
+		trailingInlineClosingTags: ReadonlyArray<string>;
 	};
 
 	export type ConstructReading = {
@@ -135,6 +141,12 @@ export namespace AST {
 	};
 
 	export type DocumentAnalysis = {
+		// Closing tags in inline HTML after a container’s last HTML block that
+		// close elements open in its skeleton, in document order
+		inlineClosingTagsByContainer: Map<Node, string[]>;
+		// Closing tags in inline HTML before each HTML block that close
+		// elements open in its container’s skeleton, in document order
+		inlineClosingTagsByFragment: Map<HTMLNode, string[]>;
 		// Raw elements that inline HTML opened before each HTML block in its
 		// container and left open, outermost first
 		inlineOpenersByFragment: Map<HTMLNode, InlineOpener[]>;
@@ -149,6 +161,9 @@ export namespace AST {
 		// Descriptions of the innermost raw element around each reference
 		// reading that renders inside one
 		readingContainers: Map<Node, string>;
+		// Elements with opening and closing tags in separate fragments,
+		// including at least one inline fragment
+		splitElements: SplitElement[];
 	};
 
 	export type InlineLayout = {
@@ -164,9 +179,6 @@ export namespace AST {
 	};
 
 	export type InlineOpener = {
-		// Whether an inline HTML fragment contains the element’s closing tag.
-		// The block scope’s skeleton omits inline fragments
-		isClosedInline: boolean;
 		// The element’s name as written in the source
 		name: string;
 		// Where the element’s opening tag starts in the document context
@@ -238,6 +250,16 @@ export namespace AST {
 		description: string;
 		end: number;
 		start: number;
+	};
+
+	export type SplitElement = {
+		closing: Fragment;
+		// The name that Prettier prints in formatted tags
+		name: string;
+		opening: Fragment;
+		// The name as written in the opening tag. Prettier requires the closing
+		// tag to use the same spelling
+		sourceName: string;
 	};
 
 	export type Point = {

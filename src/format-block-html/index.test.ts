@@ -17,6 +17,7 @@ function createScope(
 		endsOpenBlocks: true,
 		formattedNodes: new WeakSet(),
 		ignoredNodes: new Set(),
+		inlineClosingTags: new Map(),
 		inlineOpeners: new Map(),
 		isListItem: false,
 		isPrintedTight: false,
@@ -24,6 +25,7 @@ function createScope(
 		prefixWidth: 0,
 		protectedEnds: new Set(),
 		protectedStarts: new Set(),
+		trailingInlineClosingTags: [],
 		...overrides,
 	};
 }

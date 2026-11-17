@@ -287,6 +287,8 @@ These rules define observable output without prescribing a parsing or printing a
 
 Each HTML block starts at its surrounding Markdown container’s content edge. At the document root, it has no leading indentation. Within a block quote or list item, it retains the markers and continuation indentation supplied by Prettier’s Markdown layout.
 
+A standalone `<!-- prettier-ignore -->` comment indented past the content edge is an exception: the plugin preserves its indentation, matching plain Prettier. Prettier’s Markdown printer recognizes the directive only when the HTML node’s value is exactly `<!-- prettier-ignore -->`. Extra indentation, as in ` <!-- prettier-ignore -->` at the root or `>  <!-- prettier-ignore -->` in a block quote, prevents that match, so the following HTML is still formatted. Moving the comment to the content edge would make it a directive on the next pass and protect the following Markdown node.
+
 Subsequent HTML lines are indented for their raw HTML ancestors, including ancestors opened in earlier fragments or outside the current Markdown container. Wrappers generated from Markdown add no HTML indentation because the container’s prefixes and continuation indentation already represent their layout. Moving the first line to the content edge leaves later lines at their original nesting depth. Protected spaces remain intact even when they prevent moving that first line.
 
 Intervening Markdown keeps the indentation required by its own structure and container. HTML nesting adds none. Unprotected blank lines contain only required container prefixes, such as block quote markers. Protected spaces remain intact, including whitespace-only lines inside `pre` and whitespace covered by an ignore directive.
@@ -514,7 +516,7 @@ With embedded language formatting set to `off`, that language’s syntax stays u
 
 [Prettier’s ignore directives](https://prettier.io/docs/ignore) apply within their own syntax. A Markdown `prettier-ignore` protects the next Markdown node, and Markdown range directives protect the range Prettier recognizes. HTML ignore and attribute ignore directives protect their corresponding HTML targets. Sharing an open element doesn’t extend a directive to unrelated fragments.
 
-Within the [formatting scope](#formatting-scope), protected source retains its formatting, including attribute spacing and internal blank lines. Document line ending normalization and necessary Markdown container prefixes still apply. Changes outside the protected region leave the directive’s target and the document’s interpretation intact.
+Within the [formatting scope](#formatting-scope), protected source retains its formatting, including attribute spacing and internal blank lines. Document line ending normalization still applies. When Markdown container prefixes change, the protected target’s first line and continuation lines receive the corresponding new prefixes. Its content and internal whitespace, measured after those prefixes, remain intact. Changes outside the protected region leave the directive’s target and the document’s interpretation intact.
 
 An omitted closing tag stays omitted when a node or range ignore protects the element’s opening tag. An attribute ignore alone doesn’t prevent closing tag completion. An explicit closing tag outside the protected region remains eligible for formatting.
 

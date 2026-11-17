@@ -73,6 +73,59 @@ export default function sliceMarkdownSource(
 }
 
 /**
+ * Returns a node’s source without the surrounding block quote and list item
+ * prefixes, read from outermost to innermost. Characters after those prefixes
+ * stay unchanged, except that a tab extending beyond a prefix leaves its
+ * remaining columns as spaces. With `isRelativeToNode`, later lines also lose
+ * the indentation between the containers’ content edge and the node’s first
+ * line.
+ */
+export function stripContainerPrefixes(
+	source: string,
+	node: AST.Node,
+	containers: ReadonlyArray<AST.Node>,
+	isRelativeToNode = false
+): string | undefined {
+	const start = node.position?.start.offset;
+	const end = node.position?.end.offset;
+
+	if (start === undefined || end === undefined) {
+		return undefined;
+	}
+
+	const firstLineStart = source.lastIndexOf('\n', start - 1) + 1;
+	const firstLineEnd = source.indexOf('\n', start);
+	const firstLine = source.slice(
+		firstLineStart,
+		firstLineEnd === -1 ? undefined : firstLineEnd
+	);
+	const indentation = isRelativeToNode
+		? measureColumns(firstLine.slice(0, start - firstLineStart)) -
+			readPrefixes(source, firstLineStart, firstLine, containers).column
+		: 0;
+	let lineStart = start;
+
+	return source
+		.slice(start, end)
+		.split('\n')
+		.map((line, index) => {
+			const cursor =
+				index === 0
+					? undefined
+					: readPrefixes(source, lineStart, line, containers);
+			lineStart += line.length + 1;
+
+			if (!cursor) {
+				return line;
+			}
+
+			skipColumns(line, cursor, indentation);
+			return ' '.repeat(cursor.pending) + line.slice(cursor.index);
+		})
+		.join('\n');
+}
+
+/**
  * Checks whether a source line ends a paragraph inside the block quotes and
  * list items around a node. Container prefixes are read from outermost to
  * innermost. If a line lacks a block quote marker or sufficient list item
@@ -215,6 +268,12 @@ function readListMarker(line: string, cursor: LineCursor): void {
 	}
 
 	const spaces = column - cursor.column;
+
+	// The implied space has no source character for `skipColumns` to consume
+	if (index === line.length && spaces === 0) {
+		cursor.column += 1;
+		return;
+	}
 
 	skipColumns(line, cursor, index === line.length || spaces > 4 ? 1 : spaces);
 }

@@ -774,6 +774,41 @@ async function formatTag(
 }
 
 /**
+ * Returns the element name that formatting prints in an inline opening or
+ * closing tag. Prettier normalizes the name without the element’s context, so
+ * an SVG element’s name can differ from its spelling in a formatted HTML block.
+ */
+export async function formatInlineTagName(
+	tagName: string,
+	isClosingTag: boolean,
+	options: ParserOptions,
+	position: AST.Point | undefined
+): Promise<string> {
+	// Inline formatting preserves tags whose names don’t match this pattern
+	if (!CLOSING_TAG_PATTERN.test(`</${tagName}>`)) {
+		return tagName;
+	}
+
+	const singleLineOptions = getSingleLineOptions(options);
+
+	if (isClosingTag) {
+		return (
+			CLOSING_TAG_PATTERN.exec(
+				await formatClosingTag(tagName, singleLineOptions, position)
+			)?.[1] ?? tagName
+		);
+	}
+
+	const formatted = await formatHTML(
+		isVoidTag(tagName) ? `<${tagName}>` : `<${tagName}></${tagName}>`,
+		singleLineOptions,
+		position
+	);
+
+	return OPENING_TAG_PATTERN.exec(formatted)?.[1] ?? tagName;
+}
+
+/**
  * Formats a closing tag with the name that Prettier prints for its element.
  * Prettier lowercases known HTML element names but keeps the case of others,
  * such as custom elements and SVG names.
