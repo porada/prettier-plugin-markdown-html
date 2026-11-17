@@ -8,6 +8,7 @@ import isRawTextTag from '../is-raw-text-tag/index.ts';
 import {
 	describeGeneratedElement,
 	reportInvalidHTML,
+	reportUnsupportedMarkdown,
 } from '../report-error/index.ts';
 
 type HTMLNode = {
@@ -68,6 +69,13 @@ export default async function analyzeDocumentContext(
 		protectedRanges
 	);
 	checkGeneratedElements(context, options, elementsByStart, opaqueTokens);
+	checkMarkdownTexts(
+		context,
+		options,
+		root,
+		generatedStarts,
+		protectedRanges
+	);
 
 	return {
 		inlineOpenersByFragment: collectInlineOpeners(context, root),
@@ -82,9 +90,108 @@ export default async function analyzeDocumentContext(
 		),
 		protectedEnds: collectFragmentsAt(context, protectedRanges, 'end'),
 		protectedMarkdown: collectProtectedMarkdown(context, protectedRanges),
+		readingContainers: collectReadingContainers(
+			context,
+			root,
+			generatedStarts
+		),
+		protectedRanges: protectedRanges.map(({ description, end, start }) => ({
+			description,
+			end,
+			start,
+		})),
 		protectedStarts: collectFragmentsAt(context, protectedRanges, 'start'),
 		rawAncestorsByContainer: collectRawAncestors(context, elementsByStart),
 	};
+}
+
+/**
+ * Reports an error for Markdown text that Prettier’s Markdown parser reads as
+ * an HTML block when the text is not isolated and renders inside a raw element
+ * or protected content. Prettier may format the block apart from surrounding
+ * content that the reference renderer keeps together.
+ */
+function checkMarkdownTexts(
+	context: AST.DocumentContext,
+	options: ParserOptions,
+	root: HTMLNode,
+	generatedStarts: ReadonlySet<number>,
+	protectedRanges: ReadonlyArray<OpaqueToken>
+): void {
+	for (const { isIsolated, node, start } of context.markdownTexts) {
+		if (
+			!isIsolated &&
+			(protectedRanges.some(
+				(range) => range.start <= start && start < range.end
+			) ||
+				findAncestors(root, start).some(
+					(element) =>
+						!generatedStarts.has(element.sourceSpan.start.offset)
+				))
+		) {
+			reportUnsupportedMarkdown({
+				filepath: options.filepath,
+				position: node.position?.start,
+				reason: 'Prettier’s Markdown parser reads this as an HTML block, but GitHub Flavored Markdown reads it as Markdown',
+			});
+		}
+	}
+}
+
+/**
+ * Describes the innermost raw element around each reference reading that
+ * renders inside one.
+ */
+function collectReadingContainers(
+	context: AST.DocumentContext,
+	root: HTMLNode,
+	generatedStarts: ReadonlySet<number>
+): Map<AST.Node, string> {
+	const containers = new Map<AST.Node, string>();
+
+	for (const { node, start } of context.readings) {
+		const element = findAncestors(root, start).findLast(
+			({ sourceSpan }) => !generatedStarts.has(sourceSpan.start.offset)
+		);
+
+		if (element) {
+			containers.set(
+				node,
+				`\`<${element.name?.toLowerCase() ?? ''}>\` element`
+			);
+		}
+	}
+
+	return containers;
+}
+
+/**
+ * Lists the elements that contain an offset in parsed HTML, outermost first. An
+ * element’s content can extend past its source span when it has no closing tag.
+ */
+function findAncestors(node: HTMLNode, offset: number): HTMLNode[] {
+	for (const child of node.children ?? []) {
+		if (
+			child.sourceSpan.start.offset <= offset &&
+			offset < findEnd(child)
+		) {
+			return child.kind === 'element'
+				? [child, ...findAncestors(child, offset)]
+				: [];
+		}
+	}
+
+	return [];
+}
+
+/**
+ * Returns the furthest end offset among a parsed node and its descendants.
+ */
+function findEnd(node: HTMLNode): number {
+	return Math.max(
+		node.sourceSpan.end.offset,
+		...(node.children ?? []).map((child) => findEnd(child))
+	);
 }
 
 /**

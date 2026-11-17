@@ -96,11 +96,13 @@ export default async function formatBlockHTML(
 ): Promise<AST.Node[]> {
 	const marker = createMarker(scope);
 	const formattingOptions = getScopeOptions(scope, options);
-	const fragments = scope.children.filter(isHTMLNode);
+	const fragments = scope.children.filter((child) =>
+		isFragment(scope, child)
+	);
 	const brokenFragments = new Set<AST.HTMLNode>();
 
 	for (const [index, child] of scope.children.entries()) {
-		if (isHTMLNode(child) && !scope.ignoredNodes.has(child)) {
+		if (isFragment(scope, child) && !scope.ignoredNodes.has(child)) {
 			checkSourceBlock(child, scope.children[index - 1], options);
 		}
 	}
@@ -580,10 +582,10 @@ function buildSkeleton(
 	let previous: AST.Node | undefined;
 
 	for (const child of scope.children) {
-		if (isHTMLNode(child)) {
+		if (isFragment(scope, child)) {
 			// A complete comment needs no separator, which would also come
 			// between an ignore directive and its target
-			if (isHTMLNode(previous) && !isComment(previous.value)) {
+			if (isFragment(scope, previous) && !isComment(previous.value)) {
 				addMarker('comment', true);
 			}
 
@@ -897,7 +899,7 @@ function findTakenInContent(
 			return undefined;
 		}
 
-		if (!isHTMLNode(next)) {
+		if (!isFragment(scope, next)) {
 			return 'markdown';
 		}
 
@@ -986,11 +988,11 @@ function separateFromMarkdown(
 		}
 
 		const isAfterHTML =
-			previous.type === 'html' &&
+			isFragment(scope, previous) &&
 			(node.type === 'liquidNode' ||
 				(node.type === 'list' && scope.isListItem));
 		const isBeforeHTML =
-			node.type === 'html' &&
+			isFragment(scope, node) &&
 			(previous.type === 'liquidNode' || previous.type === 'paragraph');
 
 		if (isAfterHTML || isBeforeHTML) {
@@ -1238,6 +1240,17 @@ function createClosingNode(
 	scope.formattedNodes.add(node);
 
 	return node;
+}
+
+/**
+ * Checks whether an HTML node is recorded as a block fragment in the document
+ * context. Prettier’s other HTML blocks are left to its Markdown formatter.
+ */
+function isFragment(
+	scope: AST.BlockScope,
+	node: AST.Node | undefined
+): node is AST.HTMLNode {
+	return isHTMLNode(node) && scope.blockFragments.has(node);
 }
 
 /**

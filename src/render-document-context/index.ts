@@ -1,9 +1,21 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import * as pluginMarkdown from 'prettier/plugins/markdown';
+import {
+	canInterruptParagraph,
+	containsRawHTML,
+	endsInContinuingBlock,
+	startsHTMLBlock,
+} from '../is-html-block-sequence/index.ts';
 import isLooseList from '../is-loose-list/index.ts';
 import { reportUnsupportedMarkdown } from '../report-error/index.ts';
-import sliceMarkdownSource from '../slice-markdown-source/index.ts';
+import sliceMarkdownSource, {
+	isParagraphBreak,
+} from '../slice-markdown-source/index.ts';
+
+// This pattern matches inline declarations recognized by the reference
+// renderer: `<!`, an uppercase name, ASCII whitespace, and the rest up to `>`
+const GFM_DECLARATION_PATTERN = /^<![A-Z]+[\t\n\v\f\r ][^>]*>$/;
 
 type RenderOptions = {
 	filepath?: string | undefined;
@@ -90,6 +102,7 @@ export default function renderDocumentContext(
 		fragments: [],
 		generatedElements: [],
 		html: '',
+		markdownTexts: [],
 		readings: [],
 		source: options.source,
 	};
@@ -188,7 +201,27 @@ function renderNode(
 		}
 
 		case 'html':
-			renderFragment(node as AST.HTMLNode, parent, state);
+			if (
+				isMarkdownText(node as AST.HTMLNode, parent) &&
+				(state.isReading ||
+					!isBlockContainer(parent) ||
+					canLeaveToPrettier(
+						node as AST.HTMLNode,
+						parent,
+						state.options.source,
+						state.enclosingContainers
+					))
+			) {
+				renderMarkdownText(
+					node as AST.HTMLNode,
+					parent,
+					state,
+					isTight
+				);
+			} else {
+				checkInlineDeclaration(node as AST.HTMLNode, parent, state);
+				renderFragment(node as AST.HTMLNode, parent, state);
+			}
 			break;
 
 		case 'image':
@@ -544,6 +577,256 @@ function renderFragment(
 }
 
 /**
+ * Checks whether the reference renderer reads HTML from Prettier’s Markdown
+ * parser as Markdown text, such as a lowercase `<!doctype html>` block or an
+ * inline `<!DOCTYPE>`. Formatting leaves such HTML to Prettier.
+ */
+function isMarkdownText(node: AST.HTMLNode, parent: AST.Node): boolean {
+	// The reference renderer reads an inline declaration only with an uppercase
+	// name and whitespace after it
+	if (!isBlockContainer(parent)) {
+		return (
+			/^<![A-Za-z]/.test(node.value) &&
+			!GFM_DECLARATION_PATTERN.test(node.value) &&
+			!containsRawHTML(node.value.slice(2))
+		);
+	}
+
+	const source = getBlockSource(node);
+	const [firstLine = '', ...lines] = source.split('\n');
+
+	return (
+		!startsHTMLBlock(firstLine) &&
+		!lines.some((line) => canInterruptParagraph(line)) &&
+		!containsRawHTML(source)
+	);
+}
+
+/**
+ * Checks whether Prettier can format a block of Markdown text that it reads as
+ * HTML without moving raw HTML. For a one-line block, surrounding paragraph
+ * lines must be free of raw HTML. Blank lines, a container start, a preceding
+ * HTML block that has ended, or a following HTML block that interrupts the
+ * paragraph bound this check. A multi-line block uses the same check before it,
+ * but checks every line after it through the end of the document.
+ */
+function canLeaveToPrettier(
+	node: AST.HTMLNode,
+	parent: AST.Node,
+	source: string | undefined,
+	containers: ReadonlyArray<AST.Node>
+): boolean {
+	const start = node.position?.start.line;
+	const end = node.position?.end.line;
+
+	if (source === undefined || start === undefined || end === undefined) {
+		return false;
+	}
+
+	const sourceLines = source.split('\n');
+	const isBreak = createBreakCheck(source, containers);
+	const siblings = parent.children ?? [];
+	const index = siblings.indexOf(node);
+	const previous = siblings[index - 1];
+	const next = siblings[index + 1];
+	const isAfterBlock =
+		index === 0 ||
+		(previous?.type === 'html' &&
+			isOnNextLine(previous, node) &&
+			!endsInContinuingBlock(getBlockSource(previous as AST.HTMLNode)));
+	const isBeforeBlock =
+		next?.type === 'html' &&
+		isOnNextLine(node, next) &&
+		canInterruptParagraph(
+			getBlockSource(next as AST.HTMLNode).split('\n', 1)[0]!
+		);
+
+	const before = isAfterBlock
+		? []
+		: findParagraphLines(sourceLines, start - 2, -1, isBreak).toReversed();
+
+	// A later line of the block can open a fence or another block that extends
+	// to the end of the document
+	if (start !== end) {
+		return !hasRawHTML([...before, ...sourceLines.slice(end)]);
+	}
+
+	return !hasRawHTML([
+		...before,
+		...(isBeforeBlock
+			? []
+			: findParagraphLines(sourceLines, end, 1, isBreak)),
+	]);
+}
+
+/**
+ * Checks whether a block fits on one line between blank lines or container
+ * edges, so the reference renderer reads it as a paragraph of its own.
+ */
+function isIsolated(
+	node: AST.HTMLNode,
+	parent: AST.Node,
+	source: string | undefined,
+	containers: ReadonlyArray<AST.Node>
+): boolean {
+	const start = node.position?.start.line;
+	const end = node.position?.end.line;
+
+	if (source === undefined || start === undefined || start !== end) {
+		return false;
+	}
+
+	const isBreak = createBreakCheck(source, containers);
+
+	return (
+		((parent.children ?? []).indexOf(node) === 0 || isBreak(start - 2)) &&
+		isBreak(end)
+	);
+}
+
+/**
+ * Lists lines from an index in the given direction, stopping before the first
+ * line that the supplied check identifies as a paragraph break.
+ */
+function findParagraphLines(
+	lines: ReadonlyArray<string>,
+	index: number,
+	step: number,
+	isBreak: (lineIndex: number) => boolean
+): string[] {
+	const paragraphLines: string[] = [];
+
+	for (
+		let lineIndex = index;
+		lineIndex >= 0 && lineIndex < lines.length && !isBreak(lineIndex);
+		lineIndex += step
+	) {
+		paragraphLines.push(lines[lineIndex]!);
+	}
+
+	return paragraphLines;
+}
+
+/**
+ * Checks whether source lines can contain raw HTML, including tags that span
+ * several lines, or start an HTML block.
+ */
+function hasRawHTML(lines: ReadonlyArray<string>): boolean {
+	return (
+		containsRawHTML(lines.join('\n')) ||
+		lines.some((line) => startsHTMLBlock(line.replace(/^[\t >]*/, '')))
+	);
+}
+
+/**
+ * Creates a check for whether a line, by its index in the source, ends a
+ * paragraph inside the containers around a node. Lines outside the source count
+ * as breaks.
+ */
+function createBreakCheck(
+	source: string,
+	containers: ReadonlyArray<AST.Node>
+): (lineIndex: number) => boolean {
+	const lineStarts = [0];
+
+	for (
+		let offset = source.indexOf('\n');
+		offset !== -1;
+		offset = source.indexOf('\n', offset + 1)
+	) {
+		lineStarts.push(offset + 1);
+	}
+
+	return (lineIndex) =>
+		lineIndex < 0 ||
+		lineIndex >= lineStarts.length ||
+		isParagraphBreak(source, lineStarts[lineIndex]!, containers);
+}
+
+/**
+ * Reports an error for inline HTML that Prettier’s Markdown parser reads as a
+ * declaration, while the reference renderer reads it as text containing raw
+ * HTML.
+ */
+function checkInlineDeclaration(
+	node: AST.HTMLNode,
+	parent: AST.Node,
+	state: RenderState
+): void {
+	if (
+		!isBlockContainer(parent) &&
+		/^<![A-Za-z]/.test(node.value) &&
+		!GFM_DECLARATION_PATTERN.test(node.value)
+	) {
+		reportUnsupportedMarkdown({
+			filepath: state.options.filepath,
+			position: node.position?.start,
+			reason: 'Prettier’s Markdown parser reads this as a declaration, but GitHub Flavored Markdown reads it as text with raw HTML inside',
+		});
+	}
+}
+
+/**
+ * Checks whether consecutive nodes have no blank line between them.
+ */
+function isOnNextLine(
+	node: AST.Node | undefined,
+	next: AST.Node | undefined
+): boolean {
+	const end = node?.position?.end.line;
+	const start = next?.position?.start.line;
+
+	return end !== undefined && start !== undefined && start <= end + 1;
+}
+
+/**
+ * Renders escaped Markdown text that only Prettier reads as HTML, adding a
+ * paragraph wrapper to a block outside tight lists.
+ */
+function renderMarkdownText(
+	node: AST.HTMLNode,
+	parent: AST.Node,
+	state: RenderState,
+	isTight: boolean
+): void {
+	const text = escapeHTML(getBlockSource(node));
+
+	if (!isBlockContainer(parent)) {
+		write(state, text);
+		return;
+	}
+
+	const markdownText = {
+		isIsolated: isIsolated(
+			node,
+			parent,
+			state.options.source,
+			state.enclosingContainers
+		),
+		node,
+	};
+
+	if (isTight) {
+		state.context.markdownTexts.push({
+			...markdownText,
+			start: state.length,
+		});
+		write(state, text);
+		return;
+	}
+
+	startLine(state);
+	renderElement(node, 'p', '', state, () => {
+		state.context.markdownTexts.push({
+			...markdownText,
+			start: state.length,
+		});
+		write(state, text);
+	});
+	write(state, '\n');
+}
+
+/**
  * Returns the HTML of a fragment as the reference renderer emits it.
  */
 function getFragmentSource(
@@ -598,10 +881,14 @@ function renderReferenceReading(
 	const insertions = mapInsertions(sliced.text, text);
 
 	relocate(root, (offset) => sliced.offsets[insertions[offset]!]!, source);
-	state.context.readings.push(node);
+
+	const htmlNodes = findHTMLNodes(root).filter(
+		({ html, parent }) => !isMarkdownText(html, parent)
+	);
+
 	state.context.enclosingContainers.set(node, [...state.enclosingContainers]);
 
-	for (const { html, parent } of findHTMLNodes(root)) {
+	for (const { html, parent } of htmlNodes) {
 		const index = originalHTMLNodes.findIndex(
 			({ value }) => value === html.value
 		);
@@ -627,9 +914,16 @@ function renderReferenceReading(
 			: root;
 
 	const { isReading } = state;
+	const start = state.length;
 	state.isReading = true;
 	renderChildren(content, state, isTight);
 	state.isReading = isReading;
+	state.context.readings.push({
+		end: state.length,
+		hasRawHTML: htmlNodes.length > 0,
+		node,
+		start,
+	});
 }
 
 /**
@@ -640,13 +934,13 @@ export function renderReading(
 	type: string,
 	source: string,
 	parserName: 'markdown' | 'remark'
-): string {
+): AST.DocumentContext {
 	const text = READINGS[type]!.neutralize(source);
 	const root = pluginMarkdown.parsers[parserName].parse(text, {
 		originalText: text,
 	} as ParserOptions) as AST.RootNode;
 
-	return renderDocumentContext(root, { parserName, source: text }).html;
+	return renderDocumentContext(root, { parserName, source: text });
 }
 
 /**

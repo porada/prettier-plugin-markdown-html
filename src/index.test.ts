@@ -16,10 +16,10 @@ test('exposes correct public API', () => {
 
 	expect(pluginMarkdownHTML).toHaveProperty('options');
 	expect(pluginMarkdownHTML).toHaveProperty('parsers');
+	expect(pluginMarkdownHTML).toHaveProperty('printers');
+
 	expect(pluginMarkdownHTML.parsers).toHaveProperty('markdown');
 	expect(pluginMarkdownHTML.parsers).toHaveProperty('remark');
-
-	expect(pluginMarkdownHTML).toHaveProperty('printers');
 	expect(pluginMarkdownHTML.printers).toHaveProperty('mdast');
 
 	expectTypeOf<PluginOptions>().toBeObject();

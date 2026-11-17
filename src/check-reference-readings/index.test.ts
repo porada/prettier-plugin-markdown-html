@@ -5,39 +5,60 @@ import { expect, test } from 'vite-plus/test';
 import renderDocumentContext from '../render-document-context/index.ts';
 import checkReferenceReadings from './index.ts';
 
-async function check(text: string): Promise<void> {
+async function check(text: string, isProtected = false): Promise<void> {
 	const root = pluginMarkdown.parsers.markdown.parse(text, {
 		originalText: text,
 	} as ParserOptions) as AST.RootNode;
 	const context = renderDocumentContext(root, { source: text });
 
-	await checkReferenceReadings(context, () => false, {
-		filepath: 'foo.md',
-		originalText: text,
-		parser: 'markdown',
-		plugins: [],
-		printWidth: 80,
-		tabWidth: 4,
-	} as unknown as ParserOptions);
+	const protectedRanges = isProtected
+		? [{ description: 'comment', end: context.html.length, start: 0 }]
+		: [];
+
+	await checkReferenceReadings(
+		context,
+		protectedRanges,
+		new Map(),
+		() => false,
+		{
+			filepath: 'foo.md',
+			originalText: text,
+			parser: 'markdown',
+			plugins: [],
+			printWidth: 80,
+			tabWidth: 4,
+		} as unknown as ParserOptions
+	);
 }
 
-test('accepts formatting that keeps the reference rendering', async () => {
-	await expect(check('---\nfoo:   bar\n---\n')).resolves.toBeUndefined();
-	await expect(check('[^foo]: bar  baz\n')).resolves.toBeUndefined();
-	await expect(check('foo\n')).resolves.toBeUndefined();
+test('skips constructs without raw HTML', async () => {
+	await expect(check("---\nfoo: 'bar'\n---\n")).resolves.toBeUndefined();
+	await expect(check('[^foo]:\n\n    bar  baz\n')).resolves.toBeUndefined();
 });
 
-test('rejects formatting that changes the reference rendering', async () => {
-	await expect(check("---\nfoo: 'bar'\n---\n")).rejects
+test('accepts formatting that keeps raw HTML and the elements around it', async () => {
+	await expect(
+		check('[^foo]: bar <b>baz</b>  qux\n')
+	).resolves.toBeUndefined();
+	await expect(
+		check('[^foo]: bar <b>baz</b>\n\n    qux  quux\n')
+	).resolves.toBeUndefined();
+});
+
+test('rejects formatting that changes raw HTML or the elements around it', async () => {
+	await expect(check('[^foo]: bar <b>baz</b>\n    - <i>qux</i>\n')).rejects
 		.toThrowErrorMatchingInlineSnapshot(`
 		[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout in \`foo.md\` (1:1):
 
-		Formatting this frontmatter would change how GitHub Flavored Markdown renders it]
+		Formatting this footnote definition would change how GitHub Flavored Markdown renders the raw HTML in it]
 	`);
-	await expect(check('[^foo]: bar\n\n    baz  qux\n')).rejects
+});
+
+test('checks constructs inside protected content completely', async () => {
+	await expect(check('[^foo]:\n\n    bar  baz\n', true)).rejects
 		.toThrowErrorMatchingInlineSnapshot(`
 		[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout in \`foo.md\` (1:1):
 
-		Formatting this footnote definition would change how GitHub Flavored Markdown renders it]
+		Formatting this footnote definition would change the content of the comment that contains it]
 	`);
 });

@@ -16,18 +16,32 @@ const CONSTRUCT_NAMES: Readonly<Record<string, string>> = {
 };
 
 /**
- * Reports an error when Prettier’s formatting of a construct that only its
- * Markdown parser recognizes would change how GFM renders the construct’s
- * source. The comparison collapses whitespace runs outside `<pre>` elements.
+ * Reports an error when Prettier’s formatting changes the reference reading of
+ * a construct that only its Markdown parser recognizes. Readings inside
+ * protected content or raw elements are compared in full, with whitespace runs
+ * collapsed outside `<pre>` elements. Otherwise, the comparison covers only raw
+ * HTML and the tags generated around it, and runs only when raw HTML is present
+ * before or after formatting.
  */
 export default async function checkReferenceReadings(
 	context: AST.DocumentContext,
+	protectedRanges: ReadonlyArray<AST.ProtectedRange>,
+	readingContainers: ReadonlyMap<AST.Node, string>,
 	isIgnored: (node: AST.Node) => boolean,
 	options: ParserOptions
 ): Promise<void> {
 	const parserName = options.parser === 'remark' ? 'remark' : 'markdown';
 
-	for (const node of context.readings) {
+	for (const { end, hasRawHTML, node, start } of context.readings) {
+		// A comment or other protected content wholly inside the reading is
+		// already covered by the raw HTML comparison
+		const range = protectedRanges.find(
+			(protectedRange) =>
+				(protectedRange.start <= start && start < protectedRange.end) ||
+				(protectedRange.start < end && end <= protectedRange.end)
+		);
+		const container = range?.description ?? readingContainers.get(node);
+
 		const source = sliceMarkdownSource(
 			options.originalText,
 			node,
@@ -42,28 +56,63 @@ export default async function checkReferenceReadings(
 			printWidth: options.printWidth - node.position!.start.column + 1,
 		});
 
-		if (
-			normalize(renderReading(node.type, source, parserName)) !==
-			normalize(renderReading(node.type, formatted.trimEnd(), parserName))
-		) {
+		const before = renderReading(node.type, source, parserName);
+		const after = renderReading(node.type, formatted.trimEnd(), parserName);
+
+		// Raw HTML that formatting adds to the reading would be formatted on
+		// the next pass
+		if (!container && !hasRawHTML && after.fragments.length === 0) {
+			continue;
+		}
+
+		const describe = container ? describeRendering : describeHTML;
+		const name = CONSTRUCT_NAMES[node.type] ?? 'Markdown';
+
+		if (describe(before) !== describe(after)) {
 			reportUnsafeLayout({
 				filepath: options.filepath,
 				position: node.position?.start,
-				reason: `Formatting this ${CONSTRUCT_NAMES[node.type] ?? 'Markdown'} would change how GitHub Flavored Markdown renders it`,
+				reason: container
+					? `Formatting this ${name} would change the content of the ${container} that contains it`
+					: `Formatting this ${name} would change how GitHub Flavored Markdown renders the raw HTML in it`,
 			});
 		}
 	}
 }
 
 /**
- * Collapses whitespace runs outside `<pre>` elements for the rendering
- * comparison.
+ * Describes the raw HTML in a rendering and the tags generated around it,
+ * leaving out other text. Whitespace runs in the raw HTML collapse.
  */
-function normalize(html: string): string {
-	return html
+function describeHTML(context: AST.DocumentContext): string {
+	let description = '';
+	let offset = 0;
+
+	for (const { end, start } of context.fragments) {
+		description += findTags(context.html.slice(offset, start));
+		description += context.html.slice(start, end).replaceAll(/\s+/g, ' ');
+		offset = end;
+	}
+
+	return description + findTags(context.html.slice(offset));
+}
+
+/**
+ * Describes a rendering with whitespace runs collapsed outside `<pre>`
+ * elements.
+ */
+function describeRendering(context: AST.DocumentContext): string {
+	return context.html
 		.split(/(<pre[\s>][\s\S]*?<\/pre>)/)
 		.map((part, index) =>
 			index % 2 === 1 ? part : part.replaceAll(/\s+/g, ' ')
 		)
 		.join('');
+}
+
+/**
+ * Joins the tags in rendered HTML, leaving out the text between them.
+ */
+function findTags(html: string): string {
+	return html.match(/<[^>]*>/g)?.join('') ?? '';
 }

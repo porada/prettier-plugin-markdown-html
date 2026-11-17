@@ -102,6 +102,9 @@ export namespace AST {
 		// each ignored range
 		activeIgnoreComments: ReadonlySet<Node>;
 		ancestors: string[];
+		// This set contains HTML nodes recorded as block fragments in the
+		// document context
+		blockFragments: ReadonlySet<Node>;
 		children: Node[];
 		// Whether the container’s end also ends an HTML block left open as its
 		// last child
@@ -124,6 +127,13 @@ export namespace AST {
 		protectedStarts: ReadonlySet<HTMLNode>;
 	};
 
+	export type ConstructReading = {
+		end: number;
+		hasRawHTML: boolean;
+		node: Node;
+		start: number;
+	};
+
 	export type DocumentAnalysis = {
 		// Raw elements that inline HTML opened before each HTML block in its
 		// container and left open, outermost first
@@ -132,8 +142,13 @@ export namespace AST {
 		opaqueContainers: Set<Node>;
 		protectedEnds: Set<HTMLNode>;
 		protectedMarkdown: ProtectedMarkdown[];
+		// Rendered ranges of comments, raw text, and other protected content
+		protectedRanges: ProtectedRange[];
 		protectedStarts: Set<HTMLNode>;
 		rawAncestorsByContainer: Map<Node, string[]>;
+		// Descriptions of the innermost raw element around each reference
+		// reading that renders inside one
+		readingContainers: Map<Node, string>;
 	};
 
 	export type InlineLayout = {
@@ -167,9 +182,19 @@ export namespace AST {
 		fragments: Fragment[];
 		generatedElements: GeneratedElement[];
 		html: string;
-		// Constructs that only Prettier’s Markdown parser recognizes, which
-		// render as the reference renderer reads their source
-		readings: Node[];
+		// This array records HTML blocks from Prettier’s Markdown parser that
+		// the reference renderer reads as Markdown text, along with the start
+		// offset of each block’s text in the rendered HTML
+		markdownTexts: Array<{
+			// This flag indicates whether the text occupies one line between
+			// blank lines or container edges
+			isIsolated: boolean;
+			node: HTMLNode;
+			start: number;
+		}>;
+		// Constructs that only Prettier’s Markdown parser recognizes, with the
+		// range of the rendered reference reading
+		readings: ConstructReading[];
 		source: string | undefined;
 	};
 
@@ -206,6 +231,13 @@ export namespace AST {
 		// Where to report a change: the construct itself, or the opening tag or
 		// delimiter of the protected content it encloses
 		position: Point | undefined;
+	};
+
+	export type ProtectedRange = {
+		// The kind of HTML token or element that holds the content
+		description: string;
+		end: number;
+		start: number;
 	};
 
 	export type Point = {

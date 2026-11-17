@@ -63,13 +63,27 @@ export default async function preprocessMarkdown(
 	const { activeIgnoreComments, ignoredNodes } = collectIgnoredNodes(root);
 	const isIgnored = createIgnoreCheck(ignoredNodes);
 
-	await checkReferenceReadings(context, isIgnored, options);
-
+	// Without raw HTML, only raw HTML that Prettier’s formatting adds is in the
+	// plugin’s scope
 	if (context.fragments.length === 0) {
+		await checkReferenceReadings(
+			context,
+			[],
+			new Map(),
+			isIgnored,
+			options
+		);
 		return root;
 	}
 
 	const analysis = await analyzeDocumentContext(context, options);
+	await checkReferenceReadings(
+		context,
+		analysis.protectedRanges,
+		analysis.readingContainers,
+		isIgnored,
+		options
+	);
 	await checkProtectedMarkdown(
 		analysis.protectedMarkdown,
 		isIgnored,
@@ -189,6 +203,7 @@ async function formatScopes(
 		{
 			...layout,
 			activeIgnoreComments,
+			blockFragments,
 			children: container.children,
 			formattedNodes: formattedHTMLNodes,
 			ignoredNodes,

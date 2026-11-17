@@ -29,7 +29,12 @@ export default async function formatHTML(
 
 			// The outer Markdown printer applies the requested line endings
 			endOfLine: 'lf',
-			filepath: `${filepath ?? 'prettier-plugin-markdown-html'}.html`,
+
+			// Plugins can use the Markdown file’s path to locate their
+			// configuration. Without an `.htm` or `.html` extension, Prettier
+			// preserves `DOCTYPE` case, which can determine whether the
+			// reference renderer recognizes an HTML block
+			filepath: filepath?.replace(/(?:\.html?)+$/, ''),
 			parser: 'html',
 			plugins: [pluginHTML, ...(formattingOptions.plugins ?? [])],
 

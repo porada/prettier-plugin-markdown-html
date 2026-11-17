@@ -728,8 +728,8 @@ function findHTMLNodes(node: AST.Node): AST.HTMLNode[] {
 }
 
 /**
- * Formats an opening or closing tag. Returns `undefined` for other HTML tokens,
- * which keep their source text.
+ * Formats an opening or closing tag, or a declaration. Returns `undefined` for
+ * other HTML tokens, which keep their source text.
  */
 async function formatTag(
 	html: string,
@@ -740,6 +740,12 @@ async function formatTag(
 
 	if (closingTagName) {
 		return formatClosingTag(closingTagName, options, position);
+	}
+
+	// Prettier normalizes whitespace and the `html` name in doctype
+	// declarations
+	if (/^<![A-Za-z]/.test(html)) {
+		return formatHTML(html, options, position);
 	}
 
 	const tagName = OPENING_TAG_PATTERN.exec(html)?.[1];

@@ -12,6 +12,7 @@ function createScope(
 	return {
 		activeIgnoreComments: new Set(),
 		ancestors: [],
+		blockFragments: new Set(children.filter(({ type }) => type === 'html')),
 		children,
 		endsOpenBlocks: true,
 		formattedNodes: new WeakSet(),

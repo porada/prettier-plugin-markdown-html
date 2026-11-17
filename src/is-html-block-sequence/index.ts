@@ -22,6 +22,12 @@ const HTML_DISPUTED_BLOCK_TAG_NAMES = new Set([
 	'source',
 ]);
 
+// This pattern matches possible raw HTML starts in Markdown text: opening and
+// closing tags, comments, processing instructions, declarations, and CDATA
+// sections
+const HTML_INLINE_START_PATTERN =
+	/<[A-Za-z][A-Za-z0-9-]*(?:[\t\n\v\f\r ]+[A-Za-z_:][\w.:-]*(?:[\t\n\v\f\r ]*=[\t\n\v\f\r ]*(?:[^\t\n\v\f\r "'<=>`]+|'[^']*'|"[^"]*"))?)*[\t\n\v\f\r ]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[\t\n\v\f\r ]*>|<!--|<\?|<![A-Z]|<!\[CDATA\[/;
+
 // The reference renderer treats these tags as block tags, unlike Prettier’s
 // Markdown parser
 const HTML_REFERENCE_ONLY_BLOCK_TAG_NAMES = new Set(['source']);
@@ -80,6 +86,14 @@ export default function isHTMLBlockSequence(
 			(sourceReading.nonBlockLine === undefined &&
 				reading.openEnd === sourceReading.openEnd))
 	);
+}
+
+/**
+ * Checks conservatively whether Markdown text can contain raw HTML that the
+ * reference renderer recognizes. Escapes and code spans don’t prevent a match.
+ */
+export function containsRawHTML(text: string): boolean {
+	return HTML_INLINE_START_PATTERN.test(text);
 }
 
 /**

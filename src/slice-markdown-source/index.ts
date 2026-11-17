@@ -73,6 +73,53 @@ export default function sliceMarkdownSource(
 }
 
 /**
+ * Checks whether a source line ends a paragraph inside the block quotes and
+ * list items around a node. Container prefixes are read from outermost to
+ * innermost. If a line lacks a block quote marker or sufficient list item
+ * indentation, the check starts after the outer containers’ prefixes. The line
+ * breaks the paragraph if only whitespace or empty block quote markers remain.
+ * Otherwise, a line lacking a required prefix continues the paragraph lazily.
+ */
+export function isParagraphBreak(
+	source: string,
+	lineStart: number,
+	containers: ReadonlyArray<AST.Node>
+): boolean {
+	const lineEnd = source.indexOf('\n', lineStart);
+	const line = source.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+	const cursor: LineCursor = { column: 0, index: 0, pending: 0 };
+
+	for (const [index, container] of containers.entries()) {
+		if (container.type === 'blockquote' && !readQuoteMarker(line, cursor)) {
+			break;
+		}
+
+		if (container.type === 'listItem') {
+			const indentation = getListItemIndentation(
+				source,
+				container,
+				containers.slice(0, index)
+			);
+			const outer = { ...cursor };
+
+			skipColumns(line, cursor, indentation);
+
+			if (cursor.column - outer.column < indentation) {
+				Object.assign(cursor, outer);
+				break;
+			}
+		}
+	}
+
+	while (readQuoteMarker(line, cursor)) {
+		// Each marker of an empty block quote can follow up to three columns of
+		// indentation
+	}
+
+	return /^[\t ]*$/.test(line.slice(cursor.index));
+}
+
+/**
  * Reads the prefixes that containers require at the start of a line. A list
  * item’s first line starts with its marker, and later lines with its
  * indentation. A line without a block quote’s marker continues lazily and has

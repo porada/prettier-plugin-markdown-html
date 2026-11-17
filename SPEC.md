@@ -10,19 +10,21 @@ Each example pairs the required Markdown output with its rendered HTML. Prettier
 
 ## Target and Guarantees
 
-Formatting follows Prettier’s style while preserving the document’s [GitHub Flavored Markdown](https://github.github.com/gfm/) (GFM) meaning. Markdown, raw HTML, and literal code retain their original roles.
+Formatting follows Prettier’s style while preserving [GitHub Flavored Markdown](https://github.github.com/gfm/) (GFM) meaning within the plugin’s [formatting scope](#formatting-scope). Markdown, raw HTML, and literal content within that scope retain their roles.
 
-Malformed HTML produces an error. The same applies when the required layout can’t preserve meaning or produce stable output. An affected region is never left unformatted as a fallback.
+Malformed HTML produces an error. The same applies when the required formatting can’t preserve meaning or meet the [stability guarantee](#stability). The first successful pass meets those requirements.
 
-The first successful pass produces a [stable layout](#stability) for the complete document, including regions without raw HTML.
+Other Markdown follows Prettier. Differences or defects in Prettier’s parsers and printers, or quirks of the reference renderer, require no detection, repair, or additional error when their effects stay outside the formatting scope. This exception includes changes in meaning and instability.
 
 The [reference profile](#gfm-profile) defines the GFM interpretation that formatting preserves.
 
 ## Formatting Scope
 
-The plugin supports Prettier’s `markdown` and `remark` parsers. It formats raw HTML wherever GFM recognizes it, including inline tags, HTML blocks, and HTML inside block quotes and list items. The same rules apply within nested Markdown containers.
+The plugin supports Prettier’s `markdown` and `remark` parsers. It formats raw HTML recognized in the input by the [reference profile](#gfm-profile), including inline tags, HTML blocks, and HTML inside block quotes and list items. The same rules apply within nested Markdown containers.
 
-Inline code, fenced code, indented code, and escaped text are outside raw HTML formatting and validation. Prettier remains responsible for Markdown and supported fenced languages. A sequence that resembles a tag stays ordinary text when GFM interprets it that way.
+The guarantees cover that HTML’s content and container relationships, Markdown layout affected by its formatting, and their boundaries. Already formatted and ignored raw HTML remain within this scope. Unrelated Markdown doesn’t enter it merely by appearing in the same document.
+
+Inline code, fenced code, indented code, and escaped text are outside raw HTML formatting and validation. Prettier remains responsible for Markdown and supported fenced languages. Sequences that the reference profile treats as ordinary text also remain outside HTML formatting and validation.
 
 In the example below, the inline `span` and the HTML inside the block quote are formatted. The code span keeps its literal markup, including the spaces around `=`.
 
@@ -57,17 +59,17 @@ foo <span title="bar">**baz**</span>
 <p><code>&lt;span title = &quot;corge&quot;&gt;grault&lt;/span&gt;</code></p>
 ```
 
-HTML tokens in image descriptions become literal alternative text in the reference renderer. Their spelling and spacing survive Markdown formatting. They neither undergo HTML formatting and validation nor establish HTML context for surrounding content.
+HTML-like text in image descriptions becomes literal alternative text in the reference renderer. It neither undergoes raw HTML formatting and validation nor establishes HTML context for surrounding content. Its formatting follows Prettier, subject to the content protection of any raw HTML that encloses it.
 
 ### Supported Syntax
 
 Prettier’s HTML parser determines accepted syntax, including custom elements and foreign content such as SVG. The plugin adds no separate conformance checks for attributes, permitted children, or document wrappers.
 
-MDX, JSX, and template syntax receive their ordinary interpretation under GFM and Prettier’s HTML parser. They introduce no additional dialect or execution semantics. A construct that both parsers accept follows this specification even if it resembles another language. The plugin doesn’t infer that language or rewrite literal text to accommodate it. YAML front matter keeps its GFM interpretation. Whitespace changes follow the same content and whitespace rules as other Markdown. Changes to GFM structure, HTML interpretation, or significant content produce an error, even when they preserve the YAML values.
+MDX, JSX, and template syntax receive their ordinary interpretation under GFM and Prettier’s HTML parser. They introduce no additional dialect or execution semantics. The plugin doesn’t infer another language or rewrite literal text to accommodate it. Frontmatter, math, and other syntax specific to Prettier follow its formatting outside the [formatting scope](#formatting-scope). Source that the reference profile recognizes as raw HTML remains subject to this specification even when Prettier assigns it to another construct.
 
-Prettier’s Markdown parser recognizes `[^foo]: bar` as a footnote definition and treats the following indented markup as its content. The reference profile disables footnotes and interprets that line as an ordinary link reference definition. At the document root, markup indented by four spaces after the definition and a blank line therefore forms a separate code block and keeps its attribute spacing.
+Prettier’s Markdown parser recognizes `[^foo]: bar` as a footnote definition and treats following indented markup as its content. The reference profile disables footnotes and interprets that line as an ordinary link reference definition. At the document root, markup indented by four spaces after the definition and a blank line is therefore code under the reference profile. The plugin doesn’t format that code as HTML. Changes made by Prettier’s footnote formatting follow the upstream exception unless they affect covered HTML content or boundaries.
 
-Other Prettier plugins can format unrelated languages. A replacement for the Markdown or HTML parser or printer is compatible only when it preserves this specification’s interpretation and guarantees. Detected incompatibilities, such as an unsupported Markdown syntax tree, produce an error instead of silently skipping raw HTML formatting. Arbitrary third-party replacements have no compatibility guarantee.
+Other Prettier plugins can format unrelated languages. A replacement for the Markdown or HTML parser or printer is compatible only when it supports this specification within the formatting scope. Detected incompatibilities that prevent required raw HTML formatting or validation, such as an unsupported Markdown syntax tree, produce an error instead of silently skipping that work. Arbitrary third-party replacements have no compatibility guarantee.
 
 ## Input Acceptance
 
@@ -75,7 +77,7 @@ Other Prettier plugins can format unrelated languages. A replacement for the Mar
 
 An HTML fragment is a portion of Markdown that GFM interprets as raw HTML. Several fragments can belong to one element, with Markdown between them. Ending a fragment doesn’t close that element or make its markup malformed.
 
-Document context is the complete output of the pinned reference renderer, with raw HTML enabled and the disallowed raw HTML filter omitted. Prettier’s HTML parser assesses that output before sanitization. This defines acceptance without requiring the implementation to render the document as an intermediate step.
+Document context is the complete output of the pinned reference renderer, with raw HTML enabled and the disallowed raw HTML filter omitted. That context determines raw HTML’s content, ancestors, and boundaries. Prettier’s HTML parser determines acceptance of the raw HTML together with generated markup that interacts with it, before sanitization. This defines acceptance without requiring the implementation to render the document as an intermediate step.
 
 Every element generated by the reference participates in that context: paragraph and container wrappers, emphasis, links, code elements, table rows and cells, and task list inputs. Escaped text and code contribute their rendered text and escaping. Image descriptions contribute literal alternative text. Reference definitions don’t create wrappers, and disabled footnotes don’t create containers.
 
@@ -191,9 +193,11 @@ Normalization stays within Prettier’s HTML semantics. The plugin makes no inde
 
 Prettier’s tokenizer distinguishes elements and text from comments, declarations, processing instructions, CDATA sections, and raw text. An apparent tag inside an opaque token doesn’t open or close an element. In `<?foo </div> ?>`, for example, Prettier reads `</div>` as part of the processing instruction rather than an unmatched closing tag.
 
+Doctype declarations preserve the source’s letter case for the `DOCTYPE` keyword in both block and inline raw HTML. This applies even when lowercasing the keyword would leave the reference interpretation unchanged. The rest of the declaration follows Prettier’s normalization, including whitespace and the `html` name. Ignore directives and the existing content and boundary requirements still apply.
+
 GFM determines source boundaries independently. It ends a processing instruction block at `?>`, even when Prettier ends its instruction at an earlier `>`. Formatting preserves both interpretations, including any following text or elements Prettier recognizes. A required layout that can’t preserve them produces an error.
 
-An opaque HTML token can contain output from several GFM nodes. Both the original Markdown interpretation and the significant content emitted inside the token remain intact. Apparent tags there are token content, not elements to format. Raw HTML portions retain the reference’s text after applicable container prefixes are removed and `\|` becomes `|` in table cells. Other backslashes in raw HTML remain literal. Markdown syntax can change only if it produces identical [protected content](#content-and-whitespace), subject to the selected line ending normalization.
+An opaque HTML token can contain output from several GFM nodes. Both the original Markdown interpretation and the significant content emitted inside the token remain intact. Apparent tags there are token content, not elements to format. Except for the doctype normalization described above, raw HTML portions retain the reference’s text after applicable container prefixes are removed and `\|` becomes `|` in table cells. Other backslashes in raw HTML remain literal. Markdown syntax can change only if it produces identical [protected content](#content-and-whitespace), subject to the selected line ending normalization.
 
 An opaque token can enclose a complete generated element. Consuming only that element’s opening or closing boundary is a formatting error, even when Prettier accepts the combined HTML. A comment opened inside a block quote and closed outside it, for example, can’t swallow the generated `</blockquote>`. The plugin doesn’t compensate by adding raw closing tags for wrappers generated from Markdown.
 
@@ -261,7 +265,7 @@ Preformatted text and raw text elements retain Prettier’s content protection. 
 
 Markdown that renders inside protected content inherits that protection while remaining subject to normal Markdown formatting and ignore directives. If formatting changes the protected rendered content beyond its permitted normalization, the result is an error. Preserving the Markdown source is not an additional fallback. For example, collapsing two spaces between words in a paragraph that renders inside `pre` or a comment produces an error.
 
-Comments, declarations, and processing instructions recognized by GFM follow Prettier’s treatment. Existing comments retain their content and position relative to surrounding content, subject to Prettier’s formatting directives. Formatting adds no comments, sentinel text, wrapper elements, or extra escapes to preserve indentation or affect parsing.
+Comments, declarations, and processing instructions recognized by GFM follow Prettier’s treatment, with the doctype casing adjustment defined in [Non-Element Markup](#non-element-markup). Existing comments retain their content and position relative to surrounding content, subject to Prettier’s formatting directives. Formatting adds no comments, sentinel text, wrapper elements, or extra escapes to preserve indentation or affect parsing.
 
 ## HTML and Markdown Layout
 
@@ -269,11 +273,11 @@ Comments, declarations, and processing instructions recognized by GFM follow Pre
 
 For a given input, formatter version, and effective configuration, the following sequence determines the result:
 
-1. The pinned GFM profile establishes the source’s interpretation, complete HTML context, protected content, and formatting controls. The input acceptance rules apply, including rejection of partial generated elements inside opaque tokens. Parser, formatter, and integration errors propagate.
-2. Prettier supplies the initial Markdown and HTML formatting, including accepted normalization and required closing tags. Layout accounts for the actual HTML ancestors and available line width.
+1. The pinned GFM profile establishes the source’s interpretation, complete HTML context, protected content, and formatting controls. The input acceptance rules apply, including rejection of partial generated elements inside opaque tokens. Errors thrown by parsers, formatters, or required integrations propagate.
+2. Prettier supplies the initial Markdown and HTML formatting, including accepted normalization and required closing tags. Layout accounts for the actual HTML ancestors and available line width. Doctype keyword casing follows [Non-Element Markup](#non-element-markup).
 3. The required container prefixes, HTML indentation, and blank lines are applied at boundaries. GFM’s start and end markers remain recognizable. A marker or complete tag that needs one physical line uses Prettier’s syntax for that layout without changing significant content. A block whose first tag needs to stand apart from its content uses the expanded layout.
 4. Line breaks within inline tag syntax follow Prettier where they preserve Markdown interpretation. A bracket or end marker rejoins its tag if the break would create Markdown structure. Another unsafe break inside a tag puts the complete tag on one physical line. Removed breaks use the spacing Prettier would use without wrapping. Outside tag syntax, breaks follow the Markdown formatter and `proseWrap`, including between adjacent tags. The exception is a break that would turn inline HTML, including a comment, into an HTML block. That break rejoins the HTML to preceding inline content even if the Markdown formatter introduced it. Hard line breaks and protected content remain intact.
-5. The resulting layout satisfies preservation, stability, and the applicable ignore and range constraints. If any condition remains unmet, formatting reports an error. It doesn’t select another layout, leave a region unformatted as a fallback, or rely on a later pass to repair the result.
+5. The resulting layout satisfies preservation, stability, and the applicable ignore and range constraints within the [formatting scope](#formatting-scope). If any condition remains unmet, formatting reports an error. It doesn’t select another layout, leave a region unformatted as a fallback, or rely on a later pass to repair the result.
 
 The single physical line required by a heading or table row takes precedence over optional inline wrapping. Normalized declarations and tags retain their GFM interpretation. The defined adjustments can exceed the preferred width or override attribute and bracket preferences, but allow no other reflow of Markdown or HTML.
 
@@ -293,7 +297,7 @@ Exactly one blank line separates an HTML block from an adjacent Markdown block w
 
 A boundary stays unpadded when adding a blank line would turn a tight list into a loose one. One blank line remains when it preserves an existing loose list or terminates an HTML block. Significant whitespace remains protected. If no permitted boundary preserves the interpretation, formatting reports an error.
 
-List tightness follows the reference parser, including the effect of blank lines inside HTML blocks. Blank lines don’t move across HTML block or list item boundaries to obtain another layout. The same boundary rules govern trailing blank lines when a block reaches the end of its container. Output that remains unstable after those adjustments produces an error. Suppressing or relocating a separator between loose list items is not an additional stabilization step. A processing instruction that absorbs the following separator and keeps gaining blank lines on each pass therefore produces an error.
+For lists whose content or layout is affected by HTML formatting, tightness follows the reference parser, including the effect of blank lines inside HTML blocks. Blank lines don’t move across HTML block or list item boundaries to obtain another layout. The same boundary rules govern trailing blank lines when a block reaches the end of its container. Output that remains unstable after those adjustments produces an error. Suppressing or relocating a separator between loose list items is not an additional stabilization step. A processing instruction that absorbs the following separator and keeps gaining blank lines on each pass therefore produces an error.
 
 Adjacent HTML blocks keep a separating blank line when removing it would change their GFM interpretation. That separation reduces to one blank line unless its content is protected. Other spacing within HTML follows Prettier.
 
@@ -504,13 +508,13 @@ Line width is a layout preference. The available space accounts for nesting and 
 
 Prettier recognizes and formats supported embedded languages in raw HTML, including supported `script` and `style` content. Language selection and formatting follow Prettier and the effective embedded language setting. The plugin doesn’t infer a language Prettier doesn’t recognize.
 
-With embedded language formatting set to `off`, that language’s syntax stays unformatted while Prettier’s surrounding HTML layout still applies. Unsupported embedded content receives Prettier’s normal preservation behavior. Errors from an invoked embedded formatter propagate, without a fallback to unchanged content.
+With embedded language formatting set to `off`, that language’s syntax stays unformatted while Prettier’s surrounding HTML layout still applies. Unsupported embedded content receives Prettier’s normal preservation behavior. When Prettier preserves embedded content after a formatting failure, the plugin follows that behavior. Errors thrown by Prettier propagate. HTML acceptance, applicable content protection, and stability requirements still apply.
 
 ### Ignore Directives
 
 [Prettier’s ignore directives](https://prettier.io/docs/ignore) apply within their own syntax. A Markdown `prettier-ignore` protects the next Markdown node, and Markdown range directives protect the range Prettier recognizes. HTML ignore and attribute ignore directives protect their corresponding HTML targets. Sharing an open element doesn’t extend a directive to unrelated fragments.
 
-Protected source retains its formatting, including attribute spacing and internal blank lines. Document line ending normalization and necessary Markdown container prefixes still apply. Changes outside the protected region leave the directive’s target and the document’s interpretation intact.
+Within the [formatting scope](#formatting-scope), protected source retains its formatting, including attribute spacing and internal blank lines. Document line ending normalization and necessary Markdown container prefixes still apply. Changes outside the protected region leave the directive’s target and the document’s interpretation intact.
 
 An omitted closing tag stays omitted when a node or range ignore protects the element’s opening tag. An attribute ignore alone doesn’t prevent closing tag completion. An explicit closing tag outside the protected region remains eligible for formatting.
 
@@ -520,25 +524,25 @@ Prettier controls file exclusions and pragma options. A file it skips entirely n
 
 ### Range Formatting
 
-Range formatting applies the edits Prettier supports for the selected parser and range while preserving the surrounding document’s interpretation. When Prettier makes no Markdown edits for that operation, accepted input returns unchanged after HTML validation. The stability guarantee for complete documents doesn’t require formatting the remainder during a range operation.
+Range formatting follows Prettier’s selected parser and range, with preservation requirements applying within the [formatting scope](#formatting-scope). When Prettier makes no Markdown edits for that operation, accepted input returns unchanged after HTML validation. The stability guarantee for complete documents doesn’t require formatting the remainder during a range operation.
 
 Unless Prettier skips the file, HTML validation covers the complete document, including content outside the range. An edit needed to preserve the interpretation of changes made within the range is a required edit. If that edit lies beyond the range Prettier permits, formatting reports an error. Unformatted content elsewhere doesn’t, by itself, require an edit.
 
 ## Output and Errors
 
-Successful output uses Prettier’s selected line endings throughout the document and follows its normal final newline convention. Fragment formatting leaves neither mixed line endings nor extra blank lines at the end. Temporary markers and internal formatting state never appear in the result.
+Document line endings and the final newline follow Prettier. HTML formatting and its Markdown adjustments use the selected line endings and introduce neither mixed line endings nor extra blank lines at the end. Temporary markers and internal formatting state never appear in the result.
 
-Formatting reports an error when input violates an acceptance rule, an invoked formatter fails, an integration is incompatible, or the permitted layout can’t meet preservation, protection, range, and stability requirements. A valid but unsupported arrangement is distinct from an HTML syntax error. The plugin never returns a partly formatted document in place of an error or leaves an affected region unchanged as a fallback.
+Formatting reports an error when raw HTML violates an acceptance rule, Prettier throws an error, a required integration is incompatible, or the permitted layout can’t meet preservation, protection, range, and stability requirements within the [formatting scope](#formatting-scope). A valid but unsupported arrangement is distinct from an HTML syntax error. The plugin never converts these errors into a partly formatted document or unchanged source.
 
 Each error identifies the plugin and includes the file path when supplied. Errors distinguish rejected HTML, unsafe Markdown layout, and incompatible formatter integration, while retaining any underlying error as the cause. Available source positions refer to the original Markdown, not an internal fragment or generated wrapper. Exact diagnostic wording is outside this contract.
 
 ## Conformance
 
-A successful operation on a complete document passes all three comparisons:
+The following comparisons apply within the [formatting scope](#formatting-scope). The complete document context still determines the content, ancestry, and boundaries of raw HTML.
 
-1. The input and output agree under the pinned GFM profile in their Markdown structures, container relationships, list tightness, inline relationships, hard breaks, and division between Markdown, raw HTML, and literal content. Raw HTML added by the specified closing tag completion is exempt from this comparison, while the original content retains its structure and interpretation. Source positions and Prettier’s normal syntax choices are excluded from the comparison, including soft breaks allowed by `proseWrap` and formatting within supported code fences. Other normalization preserves the reference interpretation and significant content. Front matter and other syntax specific to Prettier receive no general exemption.
-2. The complete HTML contexts agree in elements, content ownership, attribute values, and significant text after Prettier’s accepted normalization and the specified closing tag completion. Comments, raw text, preformatted content, and ignored source retain their required content. Embedded language changes follow the selected formatter and options.
-3. A second complete formatting pass meets the [stability guarantee](#stability).
+1. The input and output agree under the pinned GFM profile in their Markdown structures, container relationships, list tightness, inline relationships, hard breaks, and division between Markdown, raw HTML, and literal content. Raw HTML added by the specified closing tag completion is exempt from this comparison, while the original content retains its structure and interpretation. Source positions and Prettier’s normal syntax choices are excluded, including soft breaks allowed by `proseWrap` and formatting within supported code fences. Other normalization preserves the reference interpretation and significant content within this scope.
+2. Within that scope, the complete HTML contexts agree in elements, content ownership, attribute values, and significant text after Prettier’s accepted normalization and the specified closing tag completion. Comments, raw text, preformatted content, and ignored source retain their required content. Embedded language changes follow the selected formatter and options.
+3. A second complete formatting pass leaves the covered content and layout unchanged under the [stability guarantee](#stability).
 
 These comparisons work alongside the layout rules. Equivalent rendering doesn’t permit another layout, and stable text doesn’t establish preserved meaning. Rejected input produces an error with no formatted result. GitHub.com or browser rendering can’t replace these comparisons.
 
@@ -550,19 +554,19 @@ Prettier’s layout and normalization preferences apply within the requirements 
 
 ### Stability
 
-Formatting depends on the input and effective configuration, without relying on previous calls.
+Within the [formatting scope](#formatting-scope), formatting depends on the input and effective configuration, without relying on previous calls.
 
-After a successful operation on the complete document, formatting its output again with the same options, plugin configuration, and formatter versions succeeds with identical text. This includes regions without raw HTML, indentation, blank lines, line endings, and the final newline.
+After a successful operation on the complete document, formatting its output again with the same options, plugin configuration, and formatter versions leaves the covered content and layout unchanged. This includes HTML indentation, blank lines, wrapping, closing tags, container prefixes, and affected Markdown boundaries.
 
-The first successful pass reaches that result. Several passes that eventually stabilize don’t satisfy the guarantee. Preservation of meaning remains an independent requirement.
+The first successful pass reaches that stable layout. Several passes that eventually stabilize don’t satisfy the guarantee. If the specified formatting and boundary adjustments can’t meet this requirement, formatting reports an error.
 
-The guarantee also covers instability caused by Prettier’s Markdown printer. The specified boundary adjustments resolve it or formatting reports an error. Delegating a region to Prettier doesn’t exempt it.
+Instability confined to other Markdown follows the upstream exception in [Target and Guarantees](#target-and-guarantees). Preservation of meaning remains an independent requirement within the formatting scope.
 
 ## Reference Settings
 
 ### GFM Profile
 
-Markdown syntax follows [GitHub Flavored Markdown](https://github.github.com/gfm/), with [`cmark-gfm@0.29.0.gfm.13`](https://github.com/github/cmark-gfm/tree/0.29.0.gfm.13) as the reference implementation. Its GFM extensions for autolinks, disallowed raw HTML, strikethrough, tables, and task lists are enabled, along with raw HTML rendering. The pinned implementation governs where its interpretation differs from the written GFM specification or Prettier’s Markdown parser.
+Markdown syntax follows [GitHub Flavored Markdown](https://github.github.com/gfm/), with [`cmark-gfm@0.29.0.gfm.13`](https://github.com/github/cmark-gfm/tree/0.29.0.gfm.13) as the reference implementation. Its GFM extensions for autolinks, disallowed raw HTML, strikethrough, tables, and task lists are enabled, along with raw HTML rendering. Within the [formatting scope](#formatting-scope), the pinned implementation governs where its interpretation differs from the written GFM specification or Prettier’s Markdown parser.
 
 Only the listed extensions are enabled. Parsing uses `CMARK_OPT_DEFAULT`, and rendering adds only `CMARK_OPT_UNSAFE`. Soft breaks render as newlines, with footnotes and smart punctuation disabled.
 
