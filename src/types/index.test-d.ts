@@ -21,10 +21,12 @@ test('exposes valid types', () => {
 	expectTypeOf<AST.RootNode>().toBeObject();
 
 	expectTypeOf<AST.HTMLNode>().toBeObject();
-	expectTypeOf<AST.HTMLGroup>().toBeObject();
-	expectTypeOf<AST.HTMLFormatMode>().toEqualTypeOf<
-		'block' | 'compact' | 'inline'
-	>();
+
+	expectTypeOf<AST.BlockScope>().toBeObject();
+	expectTypeOf<AST.DocumentAnalysis>().toBeObject();
+	expectTypeOf<AST.DocumentContext>().toBeObject();
+	expectTypeOf<AST.Fragment>().toBeObject();
+	expectTypeOf<AST.GeneratedElement>().toBeObject();
 
 	expectTypeOf<AST.Point>().toBeObject();
 	expectTypeOf<AST.Position>().toBeObject();

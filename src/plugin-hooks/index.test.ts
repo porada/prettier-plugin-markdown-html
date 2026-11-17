@@ -1,6 +1,7 @@
 import type { Parser, ParserOptions, Plugin, Printer } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import { format, formatWithCursor } from 'prettier';
+import * as pluginHTML from 'prettier/plugins/html';
 import {
 	parsers as markdownParsers,
 	printers as markdownPrinters,
@@ -10,6 +11,7 @@ import * as pluginMarkdownHTML from '../index.ts';
 import {
 	createPriorParserResolver,
 	createPriorPrinterResolver,
+	withoutOwnHooks,
 	withPriorParserOptions,
 	withPriorPrinterOptions,
 } from './index.ts';
@@ -2563,7 +2565,11 @@ test('rejects incompatible wrappers before skipping shared hooks with the `markd
 	await expect(
 		formatWithIncompatibleWrapper('markdown')
 	).rejects.toThrowErrorMatchingInlineSnapshot(
-		`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`markdown\` parser. Expected \`mdast\`, received \`incompatible-mdast\`]`
+		`
+		[TypeError: [prettier-plugin-markdown-html] Incompatible parser:
+
+		This plugin requires \`mdast\` syntax trees, but the \`markdown\` parser from another plugin produces \`incompatible-mdast\` syntax trees]
+	`
 	);
 });
 
@@ -2571,7 +2577,11 @@ test('rejects incompatible wrappers before skipping shared hooks with the `remar
 	await expect(
 		formatWithIncompatibleWrapper('remark')
 	).rejects.toThrowErrorMatchingInlineSnapshot(
-		`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`remark\` parser. Expected \`mdast\`, received \`incompatible-mdast\`]`
+		`
+		[TypeError: [prettier-plugin-markdown-html] Incompatible parser:
+
+		This plugin requires \`mdast\` syntax trees, but the \`remark\` parser from another plugin produces \`incompatible-mdast\` syntax trees]
+	`
 	);
 });
 
@@ -2579,7 +2589,11 @@ test('rejects prior parsers with incompatible AST formats with the `markdown` pa
 	await expect(
 		formatWithIncompatiblePriorParser('markdown')
 	).rejects.toThrowErrorMatchingInlineSnapshot(
-		`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`markdown\` parser. Expected \`mdast\`, received \`incompatible-mdast\`]`
+		`
+		[TypeError: [prettier-plugin-markdown-html] Incompatible parser:
+
+		This plugin requires \`mdast\` syntax trees, but the \`markdown\` parser from another plugin produces \`incompatible-mdast\` syntax trees]
+	`
 	);
 });
 
@@ -2587,6 +2601,47 @@ test('rejects prior parsers with incompatible AST formats with the `remark` pars
 	await expect(
 		formatWithIncompatiblePriorParser('remark')
 	).rejects.toThrowErrorMatchingInlineSnapshot(
-		`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`remark\` parser. Expected \`mdast\`, received \`incompatible-mdast\`]`
+		`
+		[TypeError: [prettier-plugin-markdown-html] Incompatible parser:
+
+		This plugin requires \`mdast\` syntax trees, but the \`remark\` parser from another plugin produces \`incompatible-mdast\` syntax trees]
+	`
 	);
+});
+
+test('names the file when rejecting incompatible parsers', async () => {
+	const priorPlugin: Plugin = {
+		parsers: {
+			markdown: {
+				...markdownParsers.markdown,
+				astFormat: 'incompatible-mdast',
+			},
+		},
+	};
+
+	await expect(
+		format('foo\n', {
+			filepath: 'foo/bar.md',
+			parser: 'markdown',
+			plugins: [priorPlugin, pluginMarkdownHTML],
+		})
+	).rejects.toThrow(
+		'[prettier-plugin-markdown-html] Incompatible parser in `foo/bar.md`'
+	);
+});
+
+test('removes only this plugin’s hooks from a plugin that bundles it', () => {
+	const fooParser = { ...markdownParsers.markdown, astFormat: 'foo' };
+	const bundle = {
+		...pluginMarkdownHTML,
+		languages: [{ name: 'foo', parsers: ['foo'] }],
+		parsers: { ...pluginMarkdownHTML.parsers, foo: fooParser },
+	};
+
+	const result = withoutOwnHooks(bundle) as Plugin;
+
+	expect(result.languages).toBe(bundle.languages);
+	expect(result.parsers).toStrictEqual({ foo: fooParser });
+	expect(result.printers).toStrictEqual({});
+	expect(withoutOwnHooks(pluginHTML)).toBe(pluginHTML);
 });

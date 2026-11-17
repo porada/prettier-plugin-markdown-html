@@ -12,6 +12,7 @@ import type {
 	ResolvedPriorPrinter,
 } from '../types/index.d.ts';
 import { printers as markdownPrinters } from 'prettier/plugins/markdown';
+import { reportIncompatibleParser } from '../report-error/index.ts';
 
 type ParserDelegationContext = {
 	delegation?: ResolvedPriorParser['delegation'];
@@ -25,6 +26,7 @@ type ParserOptionsWithDelegation = ParserOptions & {
 
 type ParserResolverState = {
 	entryOptions: NonNullable<ResolvedPriorParser['entryOptions']>;
+	filepath: string | undefined;
 	lifecycleState: ResolvedPriorParser['lifecycleState'];
 	name: string;
 	parserByPluginIndex: Map<number, Promise<Parser>>;
@@ -130,6 +132,7 @@ export function createPriorParserResolver(
 
 		if (!state) {
 			state = {
+				filepath: options.filepath,
 				entryOptions: {
 					locEnd: currentParser.locEnd,
 					locStart: currentParser.locStart,
@@ -223,7 +226,7 @@ async function findPriorParser(
 			continue;
 		}
 
-		assertCompatibleParser(state.name, parser, expectedAstFormat);
+		assertCompatibleParser(state, parser, expectedAstFormat);
 
 		parserPlugin ??= plugin;
 
@@ -319,14 +322,15 @@ async function initializeParser(
  * Throws when a parser’s AST format is incompatible with this plugin.
  */
 function assertCompatibleParser(
-	name: string,
+	{ filepath, name }: ParserResolverState,
 	parser: Parser,
 	expectedAstFormat: string
 ): void {
 	if (parser.astFormat !== expectedAstFormat) {
-		throw new TypeError(
-			`[prettier-plugin-markdown-html] Unsupported AST format for the \`${name}\` parser. Expected \`${expectedAstFormat}\`, received \`${parser.astFormat}\``
-		);
+		reportIncompatibleParser({
+			filepath,
+			reason: `This plugin requires \`${expectedAstFormat}\` syntax trees, but the \`${name}\` parser from another plugin produces \`${parser.astFormat}\` syntax trees`,
+		});
 	}
 }
 
@@ -552,6 +556,44 @@ async function initializePrinter(
 	return typeof printerOrInitializer === 'function'
 		? printerOrInitializer()
 		: printerOrInitializer;
+}
+
+/**
+ * Removes this plugin’s parsers and printer from a plugin, keeping anything
+ * else it provides, such as languages from a plugin that bundles this one.
+ */
+export function withoutOwnHooks(plugin: unknown): unknown {
+	const parsers = hasParsers(plugin)
+		? Object.entries(plugin.parsers).filter(
+				([, parser]) =>
+					parser === undefined ||
+					typeof parser === 'function' ||
+					!isOwnParser(parser)
+			)
+		: [];
+	const printers = hasPrinters(plugin)
+		? Object.entries(plugin.printers).filter(
+				([, printer]) =>
+					printer === undefined ||
+					typeof printer === 'function' ||
+					!isOwnPrinter(printer)
+			)
+		: [];
+
+	if (
+		(!hasParsers(plugin) ||
+			parsers.length === Object.keys(plugin.parsers).length) &&
+		(!hasPrinters(plugin) ||
+			printers.length === Object.keys(plugin.printers).length)
+	) {
+		return plugin;
+	}
+
+	return {
+		...(plugin as Record<string, unknown>),
+		parsers: Object.fromEntries(parsers),
+		printers: Object.fromEntries(printers),
+	};
 }
 
 /**

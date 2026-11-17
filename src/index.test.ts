@@ -219,6 +219,45 @@ test('formats raw HTML with compatible aliased parsers', async () => {
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
+test('checks footnote definitions as printed with another Markdown parser', async () => {
+	const parserPlugin: Plugin = {
+		parsers: { markdown: { ...markdownParsers.markdown } },
+	};
+
+	const input =
+		'[^foo]: bar\n\n    - [ ] baz\n\n      <div>\n      <p>qux</p>\n      </div>\n';
+
+	await expect(
+		format(input, {
+			parser: 'markdown',
+			plugins: [parserPlugin, pluginMarkdownHTML],
+		})
+	).resolves.toBe(input);
+});
+
+test('checks Markdown with the last plugin that supplies the parser', async () => {
+	const earlierPlugin: Plugin = {
+		parsers: {
+			markdown: {
+				...markdownParsers.markdown,
+				preprocess: (text) => text.replaceAll('foo', 'bar'),
+			},
+		},
+	};
+	const laterPlugin: Plugin = {
+		parsers: { markdown: markdownParsers.markdown },
+	};
+
+	const input = '---\ntitle: foo\n---\n\nbaz\n';
+
+	await expect(
+		format(input, {
+			parser: 'markdown',
+			plugins: [earlierPlugin, laterPlugin, pluginMarkdownHTML],
+		})
+	).resolves.toBe(input);
+});
+
 test.each(MARKDOWN_PARSER_NAMES)(
 	'composes prior parser and printer preprocess hooks with the `%s` parser',
 	async (parserName) => {
@@ -392,6 +431,10 @@ test.each([
 		'markdown',
 		'Before <textarea id = "foo">bar\n\n<div></textarea><section>\n\n<aside>baz</aside>\n</section>\n',
 	],
+	[
+		'markdown',
+		'> Before <textarea>foo\n>\n> <script>\n>\n> bar</script>\n>\n> </textarea>\n',
+	],
 	['remark', 'Before <title id = "foo">bar **baz</title> qux**\n'],
 	['remark', 'Before **<title id = "foo">bar** baz</title> After\n'],
 	['remark', 'Before <textarea id = "foo">bar\n\nbaz</textarea> After\n'],
@@ -403,19 +446,21 @@ test.each([
 		'remark',
 		'Before <textarea id = "foo">bar\n\n<div></textarea><section>\n\n<aside>baz</aside>\n</section>\n',
 	],
+	[
+		'remark',
+		'> Before <textarea>foo\n>\n> <script>\n>\n> bar</script>\n>\n> </textarea>\n',
+	],
 ] as const)(
-	'formats raw text tags across Markdown parents with the `%s` parser',
+	'rejects raw text that takes in part of an element generated from Markdown with the `%s` parser',
 	async (parserName, input) => {
 		const options = {
 			parser: parserName,
 			plugins: [pluginMarkdownHTML],
 		};
 
-		const output = await format(input, options);
-		const expectedOutput = await format(input, { parser: parserName });
-
-		expect(output).toBe(expectedOutput.replace('id = "foo"', 'id="foo"'));
-		await expect(format(output, options)).resolves.toBe(output);
+		await expect(format(input, options)).rejects.toThrow(
+			'[prettier-plugin-markdown-html] Invalid HTML'
+		);
 	}
 );
 
@@ -500,18 +545,18 @@ test('formats block HTML in block quotes and list items', async () => {
 
 test.each([
 	{
-		input: 'Before <address id = "foo" class = "bar">baz</address> After\n',
-		output: `Before <address
+		input: 'Before <center id = "foo" class = "bar">baz</center> After\n',
+		output: `Before <center
   id="foo"
-  class="bar">baz</address>
+  class="bar">baz</center>
 After
 `,
 	},
 	{
-		input: 'Before <hgroup id = "foo" class = "bar">baz</hgroup> After\n',
-		output: `Before <hgroup
+		input: 'Before <details id = "foo" class = "bar">baz</details> After\n',
+		output: `Before <details
   id="foo"
-  class="bar">baz</hgroup>
+  class="bar">baz</details>
 After
 `,
 	},
@@ -549,7 +594,7 @@ After
 );
 
 test('keeps closing block HTML stable when wrapping prose', async () => {
-	const input = 'Before <div>foo bar baz qux </div> After\n';
+	const input = 'Before <center>foo bar baz qux </center> After\n';
 	const options = {
 		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
@@ -560,17 +605,17 @@ test('keeps closing block HTML stable when wrapping prose', async () => {
 	const output = await format(input, options);
 
 	expect(output).toMatchInlineSnapshot(`
-		"Before <div>foo
+		"Before <center>foo
 		bar baz
-		qux </div>
+		qux </center>
 		After
 		"
 	`);
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
-test('keeps closing raw text HTML stable when wrapping prose', async () => {
-	const input = 'Before <title>foo bar baz qux </title> After\n';
+test('keeps raw text HTML stable when wrapping prose around it', async () => {
+	const input = 'Before <title>foo</title> bar baz qux After\n';
 	const options = {
 		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
@@ -580,18 +625,12 @@ test('keeps closing raw text HTML stable when wrapping prose', async () => {
 
 	const output = await format(input, options);
 
-	expect(output).toMatchInlineSnapshot(`
-		"Before <title>foo
-		bar baz
-		qux </title>
-		After
-		"
-	`);
+	expect(output).toBe('Before <title>foo</title>\nbar baz\nqux After\n');
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'keeps raw text HTML tokens inline when wrapping prose with the `%s` parser',
+	'rejects wrapping prose inside raw text HTML with the `%s` parser',
 	async (parserName) => {
 		const input =
 			'Before <title>foo bar baz qux <div>quux</div></title> **after**\n';
@@ -602,12 +641,9 @@ test.each(MARKDOWN_PARSER_NAMES)(
 			proseWrap: 'always' as const,
 		};
 
-		const output = await format(input, options);
-
-		expect(output).toBe(
-			'Before <title>foo\nbar baz\nqux <div>quux</div></title>\n**after**\n'
+		await expect(format(input, options)).rejects.toThrow(
+			'[prettier-plugin-markdown-html] Unsafe Markdown layout'
 		);
-		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
 
@@ -651,11 +687,13 @@ test.each([
 `,
 	},
 	{
-		input: '</a>\n<img id="foo" src="bar.png">\n',
-		output: `</a>
+		input: '<a href="foo">\n\n</a>\n<img id="bar" src="baz.png">\n',
+		output: `<a href="foo">
+
+</a>
 <img
-  id="foo"
-  src="bar.png"
+  id="bar"
+  src="baz.png"
 />
 `,
 	},
@@ -675,16 +713,18 @@ test.each([
 	}
 );
 
-test('preserves HTML blocks that start with non-block tags when formatting would turn them into paragraphs', async () => {
+test('keeps the first tag of a non-block HTML block on its own line', async () => {
 	const input = '<span id="foo" class="bar">\nbaz\n</span>\n';
-
-	const output = await format(input, {
-		parser: 'markdown',
+	const options = {
+		parser: 'markdown' as const,
 		plugins: [pluginMarkdownHTML],
 		printWidth: 20,
-	});
+	};
 
-	expect(output).toBe(input);
+	const output = await format(input, options);
+
+	expect(output).toBe('<span id="foo" class="bar">\n  baz\n</span>\n');
+	await expect(format(output, options)).resolves.toBe(output);
 });
 
 test('preserves blank lines between nested HTML blocks', async () => {
@@ -702,29 +742,40 @@ test('preserves blank lines between nested HTML blocks', async () => {
 });
 
 test.each([
-	['markdown', '<div>\n\nfoo\n\n</div>*bar*\n'],
-	['markdown', '<div>\n\nfoo\n\n</div>\n_bar_\n'],
-	['markdown', '<div>\n<section>\n\nfoo\n\n</section> </div> *bar*\n'],
-	['markdown', '> <div>\n>\n> foo\n>\n> </div>*bar*\n'],
-	['markdown', '- <div>\n\n  foo\n\n  </div>*bar*\n'],
-	['remark', '<div>\n\nfoo\n\n</div>*bar*\n'],
-	['remark', '<div>\n\nfoo\n\n</div>\n_bar_\n'],
-	['remark', '<div>\n<section>\n\nfoo\n\n</section> </div> *bar*\n'],
-	['remark', '> <div>\n>\n> foo\n>\n> </div>*bar*\n'],
-	['remark', '- <div>\n\n  foo\n\n  </div>*bar*\n'],
-] as const)(
-	'preserves raw block text after closing tags with the `%s` parser',
-	async (parserName, input) => {
-		const options = {
-			parser: parserName,
-			plugins: [pluginMarkdownHTML],
-		};
+	{
+		input: '<div>\n\nfoo\n\n</div>*bar*\n',
+		output: '<div>\n\nfoo\n\n</div>\n*bar*\n',
+	},
+	{
+		input: '<div>\n\nfoo\n\n</div>\n_bar_\n',
+		output: '<div>\n\nfoo\n\n</div>\n_bar_\n',
+	},
+	{
+		input: '<div>\n<section>\n\nfoo\n\n</section> </div> *bar*\n',
+		output: '<div>\n  <section>\n\nfoo\n\n</section>\n</div>\n*bar*\n',
+	},
+	{
+		input: '> <div>\n>\n> foo\n>\n> </div>*bar*\n',
+		output: '> <div>\n>\n> foo\n>\n> </div>\n> *bar*\n',
+	},
+	{
+		input: '- <div>\n\n  foo\n\n  </div>*bar*\n',
+		output: '- <div>\n\n  foo\n\n  </div>\n  *bar*\n',
+	},
+])(
+	'keeps text after closing tags inside its HTML block',
+	async ({ input, output: expectedOutput }) => {
+		for (const parserName of MARKDOWN_PARSER_NAMES) {
+			const options = {
+				parser: parserName,
+				plugins: [pluginMarkdownHTML],
+			};
 
-		const output = await format(input, options);
-		const expectedOutput = await format(input, { parser: parserName });
+			const output = await format(input, options);
 
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, options)).resolves.toBe(output);
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, options)).resolves.toBe(output);
+		}
 	}
 );
 
@@ -732,18 +783,12 @@ test.each([
 	['markdown', '<div title="\n\n<div>"></div>\n', ''],
 	['markdown', '<div title="\n\n<div>"></div>\n', '  '],
 	['markdown', '<div title="\n\n<div>"></div>\n', '> '],
-	['markdown', '<div title="\n  \n<div>"></div>\n', ''],
-	['markdown', '<div title="\n  \n<div>"></div>\n', '  '],
-	['markdown', '<div title="\n  \n<div>"></div>\n', '> '],
 	['markdown', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', ''],
 	['markdown', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', '  '],
 	['markdown', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', '> '],
 	['remark', '<div title="\n\n<div>"></div>\n', ''],
 	['remark', '<div title="\n\n<div>"></div>\n', '  '],
 	['remark', '<div title="\n\n<div>"></div>\n', '> '],
-	['remark', '<div title="\n  \n<div>"></div>\n', ''],
-	['remark', '<div title="\n  \n<div>"></div>\n', '  '],
-	['remark', '<div title="\n  \n<div>"></div>\n', '> '],
 	['remark', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', ''],
 	['remark', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', '  '],
 	['remark', '<div><textarea>foo\n\n<div>bar</textarea></div>\n', '> '],
@@ -770,6 +815,24 @@ test.each([
 		const expectedOutput = wrap(htmlOutput);
 
 		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	}
+);
+
+test.each(MARKDOWN_PARSER_NAMES)(
+	'clears whitespace-only lines between HTML blocks inside attribute values with the `%s` parser',
+	async (parserName) => {
+		const options = {
+			parser: parserName,
+			plugins: [pluginMarkdownHTML],
+		};
+
+		const output = await format(
+			'<div title="\n  \n<div>"></div>\n',
+			options
+		);
+
+		expect(output).toBe('<div\n  title="\n\n<div>"\n></div>\n');
 		await expect(format(output, options)).resolves.toBe(output);
 	}
 );
@@ -893,24 +956,6 @@ test.each([
 );
 
 test.each(MARKDOWN_PARSER_NAMES)(
-	'keeps native printing for preserved raw text contents with the `%s` parser',
-	async (parserName) => {
-		const input =
-			'> Before <textarea>foo\n>\n> <script>\n>\n> bar</script>\n>\n> </textarea>\n';
-		const options = {
-			parser: parserName,
-			plugins: [pluginMarkdownHTML],
-		};
-
-		const output = await format(input, options);
-		const expectedOutput = await format(input, { parser: parserName });
-
-		expect(output).toBe(expectedOutput);
-		await expect(format(output, options)).resolves.toBe(output);
-	}
-);
-
-test.each(MARKDOWN_PARSER_NAMES)(
 	'preserves HTML content across variable blockquote prefixes with the `%s` parser',
 	async (parserName) => {
 		const input = '> > <div title="\n> >\n>><div>"></div>\n';
@@ -959,7 +1004,9 @@ test('preserves blank lines after a tag split across HTML nodes', async () => {
 		    title="
 
 		<aside>"
-		  ></div>
+		  >
+
+		</div>
 		</section>
 
 		<p>foo</p>
@@ -987,7 +1034,9 @@ test('formats a root tag split across HTML nodes', async () => {
 		  title="
 
 		<aside>"
-		></div>
+		>
+
+		</div>
 		"
 	`);
 	await expect(format(output, options)).resolves.toBe(output);
@@ -1583,13 +1632,13 @@ test('reports formatting errors', async () => {
 	expect(errorWithSource).toBeInstanceOf(Error);
 	expect(errorWithSource.cause).toBeInstanceOf(Error);
 	expect(errorWithSource.message.split('\n')[0]).toMatchInlineSnapshot(
-		`"[prettier-plugin-markdown-html] Failed to format HTML fragment in \`foo/bar.md\`:"`
+		`"[prettier-plugin-markdown-html] Invalid HTML in \`foo/bar.md\` (1:15):"`
 	);
 
 	expect(errorWithoutSource).toBeInstanceOf(Error);
 	expect(errorWithoutSource.cause).toBeInstanceOf(Error);
 	expect(errorWithoutSource.message.split('\n')[0]).toMatchInlineSnapshot(
-		`"[prettier-plugin-markdown-html] Failed to format HTML fragment:"`
+		`"[prettier-plugin-markdown-html] Invalid HTML (1:15):"`
 	);
 });
 

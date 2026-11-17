@@ -15,6 +15,7 @@ import {
 import preprocessMarkdown, {
 	formattedHTMLNodes,
 } from './preprocess-markdown/index.ts';
+import printMarkdown, { alignListItemHTML } from './print-markdown/index.ts';
 
 const htmlOptions = (pluginHTML as Plugin).options!;
 const markdownOptions = (pluginMarkdown as Plugin).options!;
@@ -138,16 +139,14 @@ const mdastPrinter: Printer<AST.Node> = {
 			) as AST.Node;
 		}
 
-		return preprocessMarkdown(root, options);
+		// Analysis and error positions use the source columns
+		const preprocessed = await preprocessMarkdown(root, options);
+		alignListItemHTML(preprocessed);
+		return preprocessed;
 	},
 
 	print(path, options, print, args) {
-		const printed = markdownPrinters.mdast.print(
-			path,
-			options,
-			print,
-			args
-		);
+		const printed = printMarkdown(path, options, print, args);
 
 		if (!formattedHTMLNodes.has(path.node)) {
 			return printed;

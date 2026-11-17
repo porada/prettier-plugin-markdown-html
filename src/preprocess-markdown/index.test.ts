@@ -1,301 +1,166 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
-import { expect, test, vi } from 'vite-plus/test';
-import formatHTML from '../format-html/index.ts';
+import { expect, test } from 'vite-plus/test';
 import preprocessMarkdown from './index.ts';
 
-vi.mock(import('../format-html/index.ts'), () => ({
-	default: vi.fn(async (text: string) => {
-		await new Promise((resolve) => setTimeout(resolve));
-		return text;
-	}),
-}));
+const OPTIONS = {
+	printWidth: 80,
+	proseWrap: 'preserve',
+	tabWidth: 4,
+} as ParserOptions;
 
 test('processes root nodes only', async () => {
-	const node: AST.Node = { type: 'html', value: '<p>foo</p>' };
+	const node: AST.Node = { type: 'html', value: '<p   id="foo">bar</p>' };
 
-	const result = await preprocessMarkdown(
-		node,
-		{} as unknown as ParserOptions
-	);
+	const result = await preprocessMarkdown(node, OPTIONS);
 
 	expect(result).toBe(node);
-	expect(formatHTML).not.toHaveBeenCalled();
+	expect(node.value).toBe('<p   id="foo">bar</p>');
 });
 
-test('formats HTML in a group of nodes', async () => {
-	const root: AST.RootNode = {
-		type: 'root',
-		children: [
-			{ type: 'html', value: '<div>' },
-			{ type: 'html', value: '<p>foo</p></div>' },
-			{ type: 'text', value: 'bar' },
-		],
+test('returns documents without raw HTML unchanged', async () => {
+	const paragraph: AST.Node = {
+		children: [{ type: 'text', value: 'foo' }],
+		type: 'paragraph',
 	};
+	const root: AST.RootNode = { children: [paragraph], type: 'root' };
 
-	vi.mocked(formatHTML).mockResolvedValueOnce('<div><p>foo</p></div>');
+	const result = await preprocessMarkdown(root, OPTIONS);
 
-	await preprocessMarkdown(root, {} as unknown as ParserOptions);
-
-	expect(formatHTML).toHaveBeenCalledWith('<div>\n<p>foo</p></div>', {});
+	expect(result).toBe(root);
 	expect(root.children).toStrictEqual([
-		{ type: 'html', value: '<div><p>foo</p></div>' },
-		{ type: 'text', value: 'bar' },
+		{ children: [{ type: 'text', value: 'foo' }], type: 'paragraph' },
 	]);
 });
 
-test('formats HTML nested in block and phrasing parents', async () => {
+test('formats HTML blocks in nested containers without source positions', async () => {
 	const root: AST.RootNode = {
-		type: 'root',
 		children: [
 			{
-				type: 'blockquote',
 				children: [
 					{
-						type: 'html',
-						value: '<div id = "foo" class = "bar"><span>baz</span></div>',
-					},
-				],
-			},
-			{
-				type: 'paragraph',
-				children: [
-					{ type: 'text', value: 'Before ' },
-					{
-						type: 'html',
-						value: '<span id = "foo" class = "bar">',
-					},
-					{ type: 'text', value: 'baz' },
-					{ type: 'html', value: '</span>' },
-					{ type: 'text', value: ' After' },
-				],
-			},
-		],
-	};
-
-	vi.mocked(formatHTML)
-		.mockResolvedValueOnce(
-			'<div id="foo" class="bar"><span>baz</span></div>'
-		)
-		.mockResolvedValueOnce('<span id="foo" class="bar"></span>');
-
-	await preprocessMarkdown(root, {} as unknown as ParserOptions);
-
-	expect(formatHTML).toHaveBeenNthCalledWith(
-		1,
-		'<div id = "foo" class = "bar"><span>baz</span></div>',
-		{}
-	);
-	expect(formatHTML).toHaveBeenNthCalledWith(
-		2,
-		'<span id = "foo" class = "bar">',
-		{
-			bracketSameLine: true,
-			htmlFragmentBracketSameLine: true,
-		}
-	);
-	expect(root.children).toStrictEqual([
-		{
-			type: 'blockquote',
-			children: [
-				{
-					type: 'html',
-					value: '<div id="foo" class="bar"><span>baz</span></div>',
-				},
-			],
-		},
-		{
-			type: 'paragraph',
-			children: [
-				{ type: 'text', value: 'Before ' },
-				{ type: 'html', value: '<span id="foo" class="bar">' },
-				{ type: 'text', value: 'baz' },
-				{ type: 'html', value: '</span>' },
-				{ type: 'text', value: ' After' },
-			],
-		},
-	]);
-});
-
-test('keeps closing tags without formatting', async () => {
-	const root: AST.RootNode = {
-		type: 'root',
-		children: [
-			{ type: 'html', value: '</div>' },
-			{ type: 'text', value: 'foo' },
-		],
-	};
-
-	await preprocessMarkdown(root, {} as unknown as ParserOptions);
-
-	expect(formatHTML).not.toHaveBeenCalled();
-	expect(root.children).toStrictEqual([
-		{ type: 'html', value: '</div>' },
-		{ type: 'text', value: 'foo' },
-	]);
-});
-
-test('keeps an incomplete inline raw text tag unchanged', async () => {
-	const root: AST.RootNode = {
-		type: 'root',
-		children: [
-			{
-				type: 'paragraph',
-				children: [
-					{ type: 'html', value: '<title>' },
-					{ type: 'text', value: 'foo' },
-				],
-			},
-		],
-	};
-
-	await preprocessMarkdown(root, {} as unknown as ParserOptions);
-
-	expect(root.children[0]!.children).toStrictEqual([
-		{ type: 'html', value: '<title>' },
-		{ type: 'text', value: 'foo' },
-	]);
-});
-
-test('preserves inline block HTML without source positions', async () => {
-	const root: AST.RootNode = {
-		type: 'root',
-		children: [
-			{
-				type: 'paragraph',
-				children: [
-					{ type: 'text', value: 'Before ' },
-					{ type: 'html', value: '<div></div>' },
-				],
-			},
-		],
-	};
-
-	await preprocessMarkdown(root, {
-		proseWrap: 'always',
-	} as unknown as ParserOptions);
-
-	expect(root.children[0]!.children).toStrictEqual([
-		{ type: 'text', value: 'Before ' },
-		{ type: 'html', value: '<div></div>' },
-	]);
-});
-
-test.each<AST.Node>([
-	{
-		type: 'text',
-		value: 'Before ',
-	},
-	{
-		type: 'strong',
-		children: [{ type: 'whitespace' }],
-	},
-])(
-	'keeps inline `$type` separators that aren’t horizontal whitespace',
-	async (separator) => {
-		separator.position = {
-			start: { line: 1, column: 1, offset: 0 },
-			end: { line: 1, column: 8, offset: 7 },
-		};
-		const expectedResult = structuredClone(separator);
-
-		const root: AST.RootNode = {
-			type: 'root',
-			children: [
-				{
-					type: 'paragraph',
-					children: [
-						separator,
-						{
-							type: 'html',
-							value: '<div></div>',
-							position: {
-								start: { line: 1, column: 8, offset: 7 },
-								end: { line: 1, column: 19, offset: 18 },
+						children: [
+							{
+								children: [
+									{
+										type: 'html',
+										value: '<div   id="foo">bar</div>',
+									},
+								],
+								type: 'blockquote',
 							},
-						},
-					],
-				},
-			],
-		};
-
-		await preprocessMarkdown(root, {
-			proseWrap: 'always',
-		} as unknown as ParserOptions);
-
-		expect(root.children[0]!.children![0]).toBe(separator);
-		expect(root.children[0]!.children![0]).toStrictEqual(expectedResult);
-	}
-);
-
-test('preserves inline HTML without a tag name when wrapping prose', async () => {
-	const root: AST.RootNode = {
-		type: 'root',
-		children: [
-			{
-				type: 'paragraph',
-				children: [{ type: 'html', value: '<!-- foo -->' }],
+						],
+						type: 'listItem',
+					},
+				],
+				type: 'list',
 			},
 		],
+		type: 'root',
 	};
 
-	await preprocessMarkdown(root, {
-		proseWrap: 'always',
-	} as unknown as ParserOptions);
+	await preprocessMarkdown(root, OPTIONS);
 
-	expect(root.children[0]!.children).toStrictEqual([
-		{ type: 'html', value: '<!-- foo -->' },
+	expect(
+		root.children[0]!.children![0]!.children![0]!.children
+	).toStrictEqual([{ type: 'html', value: '<div id="foo">bar</div>' }]);
+});
+
+test('keeps HTML in footnote definitions literal', async () => {
+	const html: AST.HTMLNode = {
+		type: 'html',
+		value: '<div title = "foo">bar</div>',
+	};
+	const root: AST.RootNode = {
+		children: [
+			{ type: 'html', value: '<p   id="baz">qux</p>' },
+			{ children: [html], type: 'footnoteDefinition' },
+		],
+		type: 'root',
+	};
+
+	await preprocessMarkdown(root, OPTIONS);
+
+	expect(root.children[0]).toStrictEqual({
+		type: 'html',
+		value: '<p id="baz">qux</p>',
+	});
+	expect(html.value).toBe('<div title = "foo">bar</div>');
+});
+
+test('keeps HTML after ignore comments unchanged', async () => {
+	const root: AST.RootNode = {
+		children: [
+			{ type: 'html', value: '<!-- prettier-ignore -->' },
+			{ type: 'html', value: '<div   id="foo">bar</div>' },
+			{ type: 'html', value: '<!-- prettier-ignore-start -->' },
+			{ type: 'html', value: '<div   id="baz">qux</div>' },
+			{ type: 'html', value: '<!-- prettier-ignore-end -->' },
+			{ type: 'html', value: '<div   id="quux">corge</div>' },
+		],
+		type: 'root',
+	};
+
+	await preprocessMarkdown(root, OPTIONS);
+
+	expect(root.children.map(({ value }) => value)).toStrictEqual([
+		'<!-- prettier-ignore -->',
+		'<div   id="foo">bar</div>',
+		'<!-- prettier-ignore-start -->',
+		'<div   id="baz">qux</div>',
+		'<!-- prettier-ignore-end -->',
+		'<div id="quux">corge</div>',
 	]);
 });
 
-test('preserves blank lines detected from source offsets', async () => {
+test('keeps inline block tags off line starts only next to their separator', async () => {
+	const separator: AST.Node = { type: 'whitespace', value: ' ' };
+	const positionlessSeparator: AST.Node = { type: 'whitespace', value: ' ' };
+	const point = (offset: number): AST.Point => ({
+		column: offset + 1,
+		line: 1,
+		offset,
+	});
 	const root: AST.RootNode = {
-		type: 'root',
 		children: [
 			{
-				type: 'html',
-				value: '<div></div>',
-				position: {
-					start: { line: 1, column: 1, offset: 0 },
-					end: { line: 1, column: 12, offset: 11 },
-				},
+				children: [
+					{
+						children: [{ type: 'word', value: 'foo' }, separator],
+						position: { end: point(4), start: point(0) },
+						type: 'sentence',
+					},
+					{
+						position: { end: point(12), start: point(4) },
+						type: 'html',
+						value: '<center>',
+					},
+					{ type: 'text', value: 'bar' },
+					{ type: 'html', value: '</center>' },
+				],
+				type: 'paragraph',
 			},
 			{
-				type: 'html',
-				value: '<p></p>',
-				position: {
-					start: { line: 2, column: 1, offset: 13 },
-					end: { line: 2, column: 8, offset: 20 },
-				},
+				children: [
+					{
+						children: [
+							{ type: 'word', value: 'baz' },
+							positionlessSeparator,
+						],
+						type: 'sentence',
+					},
+					{ type: 'html', value: '<center>' },
+					{ type: 'text', value: 'qux' },
+					{ type: 'html', value: '</center>' },
+				],
+				type: 'paragraph',
 			},
 		],
-	};
-
-	await preprocessMarkdown(root, {
-		originalText: '<div></div>\n\n<p></p>',
-	} as unknown as ParserOptions);
-
-	expect(formatHTML).toHaveBeenNthCalledWith(1, '<div></div>', {
-		originalText: '<div></div>\n\n<p></p>',
-	});
-	expect(formatHTML).toHaveBeenNthCalledWith(2, '<p></p>', {
-		originalText: '<div></div>\n\n<p></p>',
-	});
-});
-
-test('keeps original nodes when trailing closing tags can’t be stripped', async () => {
-	const node: AST.Node = { type: 'html', value: '<div><p>foo</p>' };
-
-	const root: AST.RootNode = {
 		type: 'root',
-		children: [node],
 	};
 
-	vi.mocked(formatHTML).mockResolvedValueOnce('<div><p>foo</p>');
+	await preprocessMarkdown(root, { ...OPTIONS, proseWrap: 'always' });
 
-	await preprocessMarkdown(root, {} as unknown as ParserOptions);
-
-	expect(root.children).toHaveLength(1);
-	expect(root.children[0]).toBe(node);
-	expect(root.children[0]!.value).toBe('<div><p>foo</p>');
+	expect(separator.type).toBe('text');
+	expect(positionlessSeparator.type).toBe('whitespace');
 });

@@ -1,6 +1,8 @@
 import type { Options, ParserOptions } from 'prettier';
+import type { AST } from '../types/index.d.ts';
 import { format } from 'prettier';
 import * as pluginHTML from 'prettier/plugins/html';
+import { reportFormatterFailure } from '../report-error/index.ts';
 
 /**
  * Formats an HTML fragment, letting the plugin’s fragment options override
@@ -8,7 +10,8 @@ import * as pluginHTML from 'prettier/plugins/html';
  */
 export default async function formatHTML(
 	text: string,
-	options?: Options | ParserOptions
+	options?: Options | ParserOptions,
+	position?: AST.Point
 ): Promise<string> {
 	const formattingOptions = omitParserOptions(options);
 	const {
@@ -47,15 +50,14 @@ export default async function formatHTML(
 
 		return formatted.trim();
 	} catch (error: unknown) {
-		reportFormattingError(filepath, error);
+		reportFormatterFailure({ cause: error, filepath, position });
 	}
 }
 
 /**
- * Removes Markdown parser state that a nested HTML format call must
- * not inherit.
+ * Removes Markdown parser state that a nested format call must not inherit.
  */
-function omitParserOptions(
+export function omitParserOptions(
 	options: Options | ParserOptions | undefined
 ): Options {
 	if (!options) {
@@ -84,33 +86,4 @@ function omitParserOptions(
 	/* oxlint-enable eslint/no-unused-vars */
 
 	return formattingOptions;
-}
-
-/**
- * Throws an error that names the plugin and any supplied file, keeping the
- * original error as its cause.
- */
-function reportFormattingError(
-	filepath: string | undefined,
-	error: unknown
-): never {
-	let message =
-		'[prettier-plugin-markdown-html] Failed to format HTML fragment';
-
-	if (filepath) {
-		message += ` in \`${filepath}\``;
-	}
-
-	/* v8 ignore next -- @preserve */
-	if (error instanceof Error && error.message) {
-		message += `:\n\n${error.message}`;
-	}
-
-	/* v8 ignore next -- @preserve */
-	if (error instanceof SyntaxError) {
-		throw new SyntaxError(message, { cause: error });
-	}
-
-	/* v8 ignore next -- @preserve */
-	throw new Error(message, { cause: error });
 }

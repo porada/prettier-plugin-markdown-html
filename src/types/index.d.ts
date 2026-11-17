@@ -97,7 +97,102 @@ declare module 'prettier' {
 }
 
 export namespace AST {
-	export type HTMLFormatMode = 'block' | 'compact' | 'inline';
+	export type BlockScope = {
+		// Prettier ignore comments that protect nodes, including both ends of
+		// each ignored range
+		activeIgnoreComments: ReadonlySet<Node>;
+		ancestors: string[];
+		children: Node[];
+		// Whether the container’s end also ends an HTML block left open as its
+		// last child
+		endsOpenBlocks: boolean;
+		formattedNodes: WeakSet<Node>;
+		ignoredNodes: ReadonlySet<Node>;
+		// Raw elements that inline HTML opened before each HTML block and left
+		// open, outermost first
+		inlineOpeners: ReadonlyMap<HTMLNode, InlineOpener[]>;
+		isListItem: boolean;
+		// Whether Prettier’s Markdown printer puts each child on the line after
+		// the previous one, as it does in list items without blank lines
+		// between or after their children
+		isPrintedTight: boolean;
+		// Whether the reference renderer reads the container as an item of a
+		// tight list, rendering its paragraphs without `<p>` tags
+		isTight: boolean;
+		prefixWidth: number;
+		protectedEnds: ReadonlySet<HTMLNode>;
+		protectedStarts: ReadonlySet<HTMLNode>;
+	};
+
+	export type DocumentAnalysis = {
+		// Raw elements that inline HTML opened before each HTML block in its
+		// container and left open, outermost first
+		inlineOpenersByFragment: Map<HTMLNode, InlineOpener[]>;
+		// Markdown containers that render inside opaque HTML tokens
+		opaqueContainers: Set<Node>;
+		protectedEnds: Set<HTMLNode>;
+		protectedMarkdown: ProtectedMarkdown[];
+		protectedStarts: Set<HTMLNode>;
+		rawAncestorsByContainer: Map<Node, string[]>;
+	};
+
+	export type InlineOpener = {
+		// Whether an inline HTML fragment contains the element’s closing tag.
+		// The block scope’s skeleton omits inline fragments
+		isClosedInline: boolean;
+		// The element’s name as written in the source
+		name: string;
+		// Where the element’s opening tag starts in the document context
+		start: number;
+	};
+
+	export type DocumentContext = {
+		containers: Map<Node, GeneratedElement>;
+		// The block quotes and list items around each generated element and
+		// reading, outermost first
+		enclosingContainers: Map<Node, ReadonlyArray<Node>>;
+		end: Point | undefined;
+		fragments: Fragment[];
+		generatedElements: GeneratedElement[];
+		html: string;
+		// Constructs that only Prettier’s Markdown parser recognizes, which
+		// render as the reference renderer reads their source
+		readings: Node[];
+		source: string | undefined;
+	};
+
+	export type Fragment = {
+		end: number;
+		isBlock: boolean;
+		isInTableCell: boolean;
+		isSingleLine: boolean;
+		node: HTMLNode;
+		parent: Node;
+		start: number;
+	};
+
+	export type GeneratedElement = {
+		closeEnd: number;
+		closeStart: number;
+		node: Node;
+		openEnd: number;
+		openStart: number;
+		tagName: string;
+	};
+
+	export type ProtectedMarkdown = {
+		// The block quotes and list items around the construct, outermost first
+		containers: ReadonlyArray<Node>;
+		// The kind of HTML token or element containing the Markdown
+		description: string;
+		// Whether the construct encloses the protected content rather than
+		// rendering inside it
+		isEnclosing: boolean;
+		node: Node;
+		// Where to report a change: the construct itself, or the opening tag or
+		// delimiter of the protected content it encloses
+		position: Point | undefined;
+	};
 
 	export type Point = {
 		column: number;
@@ -112,18 +207,13 @@ export namespace AST {
 
 	export type Node = {
 		children?: Node[];
-		position?: Position;
+		position?: Position | undefined;
 		type?: string;
 		value?: string;
 	};
 
 	export type HTMLNode = Node & {
 		type: 'html';
-		value: string;
-	};
-
-	export type HTMLGroup = {
-		children: HTMLNode[];
 		value: string;
 	};
 

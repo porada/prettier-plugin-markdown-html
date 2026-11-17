@@ -23,6 +23,7 @@ Comes without any additional dependencies.
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p>
   <a href="#"><img src="#" alt="" /></a>
@@ -35,7 +36,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -73,6 +75,7 @@ Comes without any additional dependencies.
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p
   ><a href="#"><img src="#" alt="" /></a
@@ -85,7 +88,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details> <summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -123,6 +127,7 @@ Comes without any additional dependencies.
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p>
   <a href="#"><img src="#" alt="" /></a>
@@ -135,7 +140,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -174,6 +180,7 @@ Comes without any additional dependencies.
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p>
   <a href="#"><img src="#" alt="" /></a>
@@ -186,7 +193,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -243,6 +251,7 @@ Comes without any additional dependencies.
       src="#"
       alt=""
   /></a>
+
 </p>
 <p>
   <a href="#"
@@ -259,7 +268,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -302,6 +312,7 @@ Comes without any additional dependencies.
     <a href="#"><img src="#" alt="" /></a>
     <a href="#"><img src="#" alt="" /></a>
     <a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p>
     <a href="#"><img src="#" alt="" /></a>
@@ -314,7 +325,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+    <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -352,6 +364,7 @@ Comes without any additional dependencies.
 	<a href="#"><img src="#" alt="" /></a>
 	<a href="#"><img src="#" alt="" /></a>
 	<a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p>
 	<a href="#"><img src="#" alt="" /></a>
@@ -364,7 +377,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+	<summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -402,6 +416,7 @@ Comes without any additional dependencies.
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p>
   <a href="#"><img src="#" alt="" /></a>
@@ -414,7 +429,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -457,6 +473,7 @@ Comes without any additional dependencies.
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p>
   <a href="#"><img src="#" alt="" /></a>
@@ -469,7 +486,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -530,6 +548,7 @@ Comes without any additional dependencies.
       src="#"
       alt=""
   /></a>
+
 </p>
 <p>
   <a href="#"
@@ -546,7 +565,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
@@ -585,6 +605,7 @@ Comes without any additional dependencies.
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
   <a href="#"><img src="#" alt="" /></a>
+
 </p>
 <p>
   <a href="#"><img src="#" alt="" /></a>
@@ -597,7 +618,8 @@ Comes without any additional dependencies.
 
 ## Example
 
-<details><summary>Show example</summary>
+<details>
+  <summary>Show example</summary>
 
 \`\`\`html
 <p align="center">
