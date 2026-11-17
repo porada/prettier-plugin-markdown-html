@@ -1494,23 +1494,20 @@ describe('Block Boundaries', () => {
 });
 
 describe('Inline HTML', () => {
-	test.fails(
-		'keeps closing tags on one line when wrapping would start a block quote',
-		async () => {
-			const input =
-				'foo<span title="bar" data-description="baz" data-label="qux" data-value="quux">corge</span> grault\n';
-			const expectedOutput = `foo<span title="bar" data-description="baz" data-label="qux" data-value="quux"
+	test('keeps closing tags on one line when wrapping would start a block quote', async () => {
+		const input =
+			'foo<span title="bar" data-description="baz" data-label="qux" data-value="quux">corge</span> grault\n';
+		const expectedOutput = `foo<span title="bar" data-description="baz" data-label="qux" data-value="quux"
     >corge</span> grault
 `;
 
-			const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
 
-			expect(output).toBe(expectedOutput);
-			await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
-				output
-			);
-		}
-	);
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
 
 	test('keeps inline HTML in headings and table rows on one line', async () => {
 		const input = `# foo <span   title="bar"   class="baz">qux</span>
@@ -1540,6 +1537,602 @@ describe('Inline HTML', () => {
 
 		expect(output).toBe(expectedOutput);
 		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('lays out inline tags from the content edge of their containers', async () => {
+		const input =
+			'> - foo\n>\n>   bar<span   title="baz" data-description="qux" data-label="quux" data-value="corge">grault</span>\n';
+		const expectedOutput = `> - foo
+>
+>     bar<span
+>         title="baz"
+>         data-description="qux"
+>         data-label="quux"
+>         data-value="corge"
+>         >grault</span>
+`;
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags after task list checkboxes', async () => {
+		const input =
+			'- [ ] foo<span   title="bar" data-description="baz" data-label="qux" data-value="qu">corge</span>\n';
+		const expectedOutput = `- [ ] foo<span
+          title="bar"
+          data-description="baz"
+          data-label="qux"
+          data-value="qu"
+          >corge</span>
+`;
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('measures wide characters before inline tags by their display width', async () => {
+		const input =
+			'日本語日本語日本語 <span   title="foo" data-description="bar" data-label="baz" data-qux="quux">corge</span> grault\n';
+		const expectedOutput = `日本語日本語日本語 <span
+    title="foo"
+    data-description="bar"
+    data-label="baz"
+    data-qux="quux"
+    >corge</span> grault
+`;
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags with attached text that resembles a tag', async () => {
+		const input =
+			'foo<span   title="bar"   class="baz"><quuxcorgegrault</span>\n';
+		const expectedOutput =
+			'foo<span title="bar" class="baz"\n    ><quuxcorgegrault</span>\n';
+
+		const output = await format(input, {
+			...SPEC_EXAMPLE_OPTIONS,
+			printWidth: 40,
+		});
+
+		expect(output).toBe(expectedOutput);
+		await expect(
+			format(output, { ...SPEC_EXAMPLE_OPTIONS, printWidth: 40 })
+		).resolves.toBe(output);
+	});
+
+	test('keeps brackets after multi-line attribute values in their paragraph', async () => {
+		const input = 'foo <span   title="bar\n    baz">qux</span>\n';
+		const expectedOutput =
+			'foo <span\n    title="bar\n    baz"\n    >qux</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('joins line breaks after leading tags that fit on one line', async () => {
+		const input = '<span\n    title="foo">\nbar</span>\n';
+		const expectedOutput = '<span title="foo"> bar</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps line breaks after leading tags that stay split', async () => {
+		const input = '<span\n    title="foo"   class="bar">\nbaz</span>\n';
+		const expectedOutput =
+			'<span\n    title="foo"\n    class="bar">\nbaz</span>\n';
+
+		const output = await format(input, {
+			...SPEC_EXAMPLE_OPTIONS,
+			printWidth: 20,
+		});
+
+		expect(output).toBe(expectedOutput);
+		await expect(
+			format(output, { ...SPEC_EXAMPLE_OPTIONS, printWidth: 20 })
+		).resolves.toBe(output);
+	});
+
+	test('rejects layouts that leave leading tags alone before hard line breaks', async () => {
+		await expect(
+			format(
+				'<span\n    title="foo">  \nbar</span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Formatting would leave this tag alone on the paragraph’s first line, where Prettier or GitHub Flavored Markdown would read it as an HTML block]
+		`);
+	});
+
+	test('counts indentation after task list checkboxes from the list item’s content', async () => {
+		const options = { ...SPEC_EXAMPLE_OPTIONS, tabWidth: 2 };
+		const input =
+			'- [ ] foo<span   title="bar" data-description="baz" data-label="qux" data-v="q">corge</span> grault\n';
+		const expectedOutput =
+			'- [ ] foo<span title="bar" data-description="baz" data-label="qux" data-v="q"\n        >corge</span> grault\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('keeps backslash hard breaks after leading tags', async () => {
+		const input = '<span\n    title="foo">\\\nbar</span>\n';
+		const expectedOutput = '<span title="foo">\\\nbar</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out leading tags with a break opportunity after them', async () => {
+		const input =
+			'<span   title="foo" data-description="bar baz qux quux corge" data-label="grault"> **garply** waldo</span>\n';
+		const expectedOutput =
+			'<span title="foo" data-description="bar baz qux quux corge" data-label="grault"> **garply** waldo</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('joins soft breaks after leading tags without changing their layout', async () => {
+		const options = { ...SPEC_EXAMPLE_OPTIONS, printWidth: 40 };
+		const input =
+			'<span\n    title="foo" class="bar">\n**baz** qux quux</span>\n';
+		const expectedOutput =
+			'<span title="foo" class="bar"> **baz** qux quux</span>\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('formats tags after task list checkboxes like tags after text', async () => {
+		const input = '- [ ] <br   >\n';
+		const expectedOutput = '- [ ] <br />\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags in task items whose text starts like a heading', async () => {
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			proseWrap: 'always',
+		} as const;
+		const input =
+			'- [ ] ## Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor <span   title="foo" data-description="bar" data-label="baz">qux</span> quux\n';
+		const expectedOutput =
+			'- [ ] ## Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod\n      tempor\n      <span title="foo" data-description="bar" data-label="baz">qux</span> quux\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('lays out inline tags in task items whose text starts like a list item', async () => {
+		const input =
+			'- [ ] 1. foo\n      bar <span   title="baz" data-label="aaaaaaaaaaaaaaaaaaaaaaaaaaaa">qux</span>\n';
+		const expectedOutput =
+			'- [ ] 1. foo\n      bar <span title="baz" data-label="aaaaaaaaaaaaaaaaaaaaaaaaaaaa">qux</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags in task items whose text starts with emphasis', async () => {
+		const input =
+			'- [ ] **foo** bar <span   title="ttttttttttttttttttttttttttttttttttttt">baz</span>\n';
+		const expectedOutput =
+			'- [ ] **foo** bar <span title="ttttttttttttttttttttttttttttttttttttt">baz</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags in task items whose text starts on the next line', async () => {
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			printWidth: 42,
+			proseWrap: 'never',
+		} as const;
+		const input = '- [ ] \n  **foo** <span   title="bar">baz</span>\n';
+		const expectedOutput = '- [ ] **foo** <span title="bar">baz</span>\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('lays out inline tags in task items with spaces after their checkboxes', async () => {
+		const input =
+			'- [ ]  ## foo bar <span   title="tttttttttttttttttttttttttttttttttttttt">baz</span>\n';
+		const expectedOutput =
+			'- [ ] ## foo bar <span title="tttttttttttttttttttttttttttttttttttttt">baz</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('wraps inline tags in task items whose text starts like a heading', async () => {
+		const input =
+			'- [ ] ## foo <span   title="bar" data-description="baz qux quux corge grault garply waldo fred" data-label="plugh">xyzzy</span> thud\n';
+		const expectedOutput =
+			'- [ ] ## foo <span\n          title="bar"\n          data-description="baz qux quux corge grault garply waldo fred"\n          data-label="plugh"\n          >xyzzy</span> thud\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags in paragraphs that continue lazily with equals signs', async () => {
+		const input =
+			'> foo <span   title="bar" data-description="baz" data-label="qux" data-value="quux" data-x="y">corge</span> grault\n===\n';
+		const expectedOutput =
+			'> foo <span\n>     title="bar"\n>     data-description="baz"\n>     data-label="qux"\n>     data-value="quux"\n>     data-x="y"\n>     >corge</span> grault\n> \\===\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps line breaks inside links after leading tags', async () => {
+		const input = '<span   >[  \nfoo](bar)</span>\n';
+		const expectedOutput = '<span>[  \nfoo](bar)</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags with attached private use characters', async () => {
+		const options = { ...SPEC_EXAMPLE_OPTIONS, printWidth: 40 };
+		const input =
+			'foo<span   title="bar" class="baz">\uE000quxquuxcorge</span>\n';
+		const expectedOutput =
+			'foo<span title="bar" class="baz"\n    >\uE000quxquuxcorge</span>\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('measures tabs before inline tags as indentation levels', async () => {
+		const options = { ...SPEC_EXAMPLE_OPTIONS, useTabs: true };
+		const input =
+			'foo<span   title="bar" data-description="baz" data-label="qux" data-value="vvvvvv">quux</span> <b   title="corge" data-label="xxxxxxxxxxxxxxxxxxxxxxx">grault</b>\n';
+		const expectedOutput =
+			'foo<span title="bar" data-description="baz" data-label="qux" data-value="vvvvvv"\n\t>quux</span> <b title="corge" data-label="xxxxxxxxxxxxxxxxxxxxxxx"\n\t>grault</b>\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('lays out inline tags with attached elements', async () => {
+		const input =
+			'foo<span   title="bar" data-description="baz" data-label="qux" data-value="quux"><b>corge</b></span> grault\n';
+		const expectedOutput =
+			'foo<span title="bar" data-description="baz" data-label="qux" data-value="quux"\n    ><b>corge</b></span> grault\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags with attached tags that formatting changes', async () => {
+		const input =
+			'foo<span   title="bar" data-description="baz" data-value="vvvv">qux<br>quux</span> corge\n';
+		const expectedOutput =
+			'foo<span title="bar" data-description="baz" data-value="vvvv"\n    >qux<br />quux</span> corge\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags before later tags the same way on every pass', async () => {
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			proseWrap: 'always',
+		} as const;
+		const input =
+			'foo <i   title="vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv">bar<img   src="baz.png" alt=""></i> qux quux\n';
+		const expectedOutput =
+			'foo <i title="vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"\n    >bar<img src="baz.png" alt="" /></i> qux quux\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('lays out inline tags with attached comments', async () => {
+		const input =
+			'foo<span   title="bar" data-description="baz" data-value="v">qux<!--quux corge-->grault</span> garply\n';
+		const expectedOutput =
+			'foo<span title="bar" data-description="baz" data-value="v"\n    >qux<!--quux corge-->grault</span> garply\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out leading tags with backslash hard breaks attached', async () => {
+		const input =
+			'<span   title="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb">\\\nfoo</span>\n';
+		const expectedOutput =
+			'<span title="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"\n    >\\\nfoo</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out chains of inline tags that move one another', async () => {
+		const input =
+			'<a href="https://example.com/p0"><img   src="https://img.shields.io/b/0.svg" alt="0"></a> <a href="https://example.com/p1"><img   src="https://img.shields.io/b/1.svg" alt="1"></a> <a href="https://example.com/p2"><img   src="https://img.shields.io/b/2.svg" alt="2"></a> <a href="https://example.com/p3"><img   src="https://img.shields.io/b/3.svg" alt="3"></a> <a href="https://example.com/p4"><img   src="https://img.shields.io/b/4.svg" alt="4"></a>\n';
+		const expectedOutput =
+			'<a href="https://example.com/p0"><img\n    src="https://img.shields.io/b/0.svg"\n    alt="0"\n/></a> <a href="https://example.com/p1"><img\n    src="https://img.shields.io/b/1.svg"\n    alt="1"\n/></a> <a href="https://example.com/p2"><img\n    src="https://img.shields.io/b/2.svg"\n    alt="2"\n/></a> <a href="https://example.com/p3"><img\n    src="https://img.shields.io/b/3.svg"\n    alt="3"\n/></a> <a href="https://example.com/p4"><img\n    src="https://img.shields.io/b/4.svg"\n    alt="4"\n/></a>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out inline tags before HTML kept off line starts', async () => {
+		const input =
+			'foo<span   title="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">bar\n    <!-- c --> baz</span>\n';
+		const expectedOutput =
+			'foo<span title="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">bar <!-- c --> baz</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps inline tags with whitespace before their closing tags on one line', async () => {
+		const input =
+			'foo<span   title="ttttttttttttttttttttttttttttttttttttttttttttttttttt">bar </span> baz\n';
+		const expectedOutput =
+			'foo<span title="ttttttttttttttttttttttttttttttttttttttttttttttttttt">bar </span> baz\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('wraps brackets of inline tags with whitespace before their closing tags', async () => {
+		const input =
+			'foo<span   title="tttttttttttttttttttttttttttttttttttttttttttttttttttt">bar </span> baz\n';
+		const expectedOutput =
+			'foo<span title="tttttttttttttttttttttttttttttttttttttttttttttttttttt"\n    >bar </span> baz\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps inline selects on one line when they fit', async () => {
+		const input =
+			'foo <select   name="bar"><option>baz</option></select> qux\n';
+		const expectedOutput =
+			'foo <select name="bar"><option>baz</option></select> qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps inline lists on one line when they fit', async () => {
+		const input = '- foo <ul   class="bar"><li>baz</li></ul> qux\n';
+		const expectedOutput = '- foo <ul class="bar"><li>baz</li></ul> qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps inline selects before whitespace on one line when their tags fit', async () => {
+		const input =
+			'foo <select   class="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"> <option>bar</option></select>\n';
+		const expectedOutput =
+			'foo <select class="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"> <option\n    >bar</option></select>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('wraps brackets of inline selects whose attributes break', async () => {
+		const input =
+			'foo <select   name="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"><option>bar</option></select> baz\n';
+		const expectedOutput =
+			'foo <select\n    name="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n    id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n    ><option>bar</option></select> baz\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('wraps brackets of inline lists whose attributes break', async () => {
+		const input =
+			'- foo <ol   start="3" class="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"><li>bar</li></ol>\n';
+		const expectedOutput =
+			'- foo <ol\n      start="3"\n      class="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\n      ><li>bar</li></ol>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('normalizes attributes of inline selects', async () => {
+		const input =
+			'foo <select   NAME="bar" DISABLED><option>baz</option></select> qux\n';
+		const expectedOutput =
+			'foo <select name="bar" disabled><option>baz</option></select> qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out `srcset` values of inline images with multi-line attribute values', async () => {
+		const input =
+			'foo <img   srcset="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png 1x, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png 2x" title="bar\nbaz"> qux\n';
+		const expectedOutput =
+			'foo <img\n    srcset="\n        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png 1x,\n        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png 2x\n    "\n    title="bar\nbaz"\n/> qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('lays out `srcset` values of inline images with an attribute per line', async () => {
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			singleAttributePerLine: true,
+		};
+		const input =
+			'foo <img   srcset="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png 1x, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png 2x" alt="bar"> baz\n';
+		const expectedOutput =
+			'foo <img\n    srcset="\n        aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png 1x,\n        bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.png 2x\n    "\n    alt="bar"\n/> baz\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('lays out inline tags regardless of their line breaks in the source', async () => {
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			printWidth: 70,
+			proseWrap: 'always',
+		} as const;
+		const expectedOutput =
+			'foo bar baz qux quux corge grault garply waldo fred plugh xyzzy\n<span title="thud">foo</span>\n';
+
+		const output = await format(
+			'foo bar baz qux quux corge grault garply waldo fred plugh xyzzy <span title="thud">foo</span>\n',
+			options
+		);
+		const splitOutput = await format(
+			'foo bar baz qux quux corge grault garply waldo fred plugh xyzzy <span\n    title="thud">foo</span>\n',
+			options
+		);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+		expect(splitOutput).toBe(expectedOutput);
 	});
 
 	test('keeps inline comments off line starts when wrapping prose', async () => {

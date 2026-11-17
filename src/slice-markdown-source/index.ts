@@ -1,6 +1,6 @@
 import type { AST } from '../types/index.d.ts';
 
-type MarkdownSource = {
+export type MarkdownSource = {
 	// The source offset of each character of the text, and of its end
 	offsets: number[];
 	text: string;

@@ -188,7 +188,7 @@ export const options: Plugin['options'] = {
 	htmlFragmentBracketSameLine: {
 		category: 'Markdown HTML',
 		description:
-			'Keep the closing bracket on the last attribute line in block-level raw HTML fragments in Markdown.',
+			'Keep the closing bracket on the last attribute line in raw HTML fragments in Markdown.',
 		type: 'boolean',
 	},
 	htmlFragmentEmbeddedLanguageFormatting: {

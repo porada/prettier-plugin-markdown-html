@@ -79,9 +79,9 @@ In addition to Prettier’s [built-in options](https://prettier.io/docs/options)
 ```ts
 interface PluginOptions {
     /**
-     * Keep the closing bracket on the last attribute line in block-level raw
-     * HTML fragments in Markdown. Unlike `bracketSameLine`, this option does
-     * not affect code blocks. Falls back to `bracketSameLine` when unset.
+     * Keep the closing bracket on the last attribute line in raw HTML
+     * fragments in Markdown. Unlike `bracketSameLine`, this option does not
+     * affect code blocks. Falls back to `bracketSameLine` when unset.
      * @default undefined
      */
     htmlFragmentBracketSameLine?: boolean | undefined;

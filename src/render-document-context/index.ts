@@ -21,6 +21,9 @@ type Reading = {
 };
 
 type RenderState = {
+	// The paragraph, heading, or table cell whose inline content is being
+	// rendered
+	block: AST.Node | undefined;
 	context: AST.DocumentContext;
 	definitions: Set<string>;
 	// The block quotes and list items around the current node, outermost first
@@ -91,6 +94,7 @@ export default function renderDocumentContext(
 		source: options.source,
 	};
 	const state: RenderState = {
+		block: undefined,
 		context,
 		definitions: collectDefinitions(root),
 		enclosingContainers: [],
@@ -257,13 +261,20 @@ function renderNode(
 			// Paragraphs in tight lists render without their own element or
 			// line
 			if (isTight) {
-				renderChildren(node, state, true);
+				state.context.enclosingContainers.set(node, [
+					...state.enclosingContainers,
+				]);
+				renderInline(node, state, () => {
+					renderChildren(node, state, true);
+				});
 				break;
 			}
 
 			startLine(state);
 			renderElement(node, 'p', '', state, () => {
-				renderChildren(node, state, false);
+				renderInline(node, state, () => {
+					renderChildren(node, state, false);
+				});
 			});
 			write(state, '\n');
 			break;
@@ -401,8 +412,24 @@ function renderTableRow(
 function renderSingleLine(node: AST.Node, state: RenderState): void {
 	const { isSingleLine } = state;
 	state.isSingleLine = true;
-	renderChildren(node, state, false);
+	renderInline(node, state, () => {
+		renderChildren(node, state, false);
+	});
 	state.isSingleLine = isSingleLine;
+}
+
+/**
+ * Renders the inline content of a paragraph, heading, or table cell.
+ */
+function renderInline(
+	node: AST.Node,
+	state: RenderState,
+	renderContent: () => void
+): void {
+	const { block } = state;
+	state.block = node;
+	renderContent();
+	state.block = block;
 }
 
 /**
@@ -500,6 +527,7 @@ function renderFragment(
 
 	if (original) {
 		state.context.fragments.push({
+			block: isBlock ? undefined : state.block,
 			end: state.length,
 			isBlock,
 			isInTableCell,

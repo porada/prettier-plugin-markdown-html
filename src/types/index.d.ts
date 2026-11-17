@@ -55,9 +55,9 @@ export type ResolvedPriorPrinter = {
 
 export interface PluginOptions {
 	/**
-	 * Keep the closing bracket on the last attribute line in block-level raw
-	 * HTML fragments in Markdown. Unlike `bracketSameLine`, this option does
-	 * not affect code blocks. Falls back to `bracketSameLine` when unset.
+	 * Keep the closing bracket on the last attribute line in raw HTML fragments
+	 * in Markdown. Unlike `bracketSameLine`, this option does not affect code
+	 * blocks. Falls back to `bracketSameLine` when unset.
 	 * @default undefined
 	 */
 	htmlFragmentBracketSameLine?: PrettierOptions['bracketSameLine'];
@@ -136,6 +136,18 @@ export namespace AST {
 		rawAncestorsByContainer: Map<Node, string[]>;
 	};
 
+	export type InlineLayout = {
+		// The columns before the innermost container’s content in GitHub
+		// Flavored Markdown, from which a paragraph line’s indentation counts
+		containerEdge: number;
+		// The block quotes and list items around the paragraph, outermost first
+		containers: ReadonlyArray<Node>;
+		// The columns before the paragraph’s content in Prettier’s layout,
+		// including checkbox width and list continuation indentation
+		contentEdge: number;
+		paragraph: Node;
+	};
+
 	export type InlineOpener = {
 		// Whether an inline HTML fragment contains the element’s closing tag.
 		// The block scope’s skeleton omits inline fragments
@@ -162,6 +174,8 @@ export namespace AST {
 	};
 
 	export type Fragment = {
+		// The paragraph, heading, or table cell around an inline fragment
+		block: Node | undefined;
 		end: number;
 		isBlock: boolean;
 		isInTableCell: boolean;

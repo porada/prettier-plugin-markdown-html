@@ -398,16 +398,19 @@ test.each([
 			title: `<b id='foo'>bar</b>`,
 		}[tagName];
 		const input = `Before <${tagName} id = "foo">${content}</${tagName}> <span id = "bar">baz</span> After\n`;
+		// The width keeps the line unwrapped, so only the tags change
 		const options = {
 			embeddedLanguageFormatting,
 			parser: parserName,
 			plugins: [pluginMarkdownHTML],
+			printWidth: 120,
 		};
 
 		const output = await format(input, options);
 		const expectedOutput = await format(input, {
 			embeddedLanguageFormatting,
 			parser: parserName,
+			printWidth: 120,
 		});
 
 		expect(output).toBe(
@@ -564,7 +567,8 @@ After
 		input: 'Before <meta id = "foo" class = "bar"> After\n',
 		output: `Before <meta
   id="foo"
-  class="bar" />
+  class="bar"
+/>
 After
 `,
 	},
@@ -572,7 +576,8 @@ After
 		input: 'Before <source id = "foo" class = "bar"> After\n',
 		output: `Before <source
   id="foo"
-  class="bar" />
+  class="bar"
+/>
 After
 `,
 	},

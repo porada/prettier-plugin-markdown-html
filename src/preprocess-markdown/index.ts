@@ -26,6 +26,11 @@ type ScopeState = {
 	fragments: Set<AST.HTMLNode>;
 	ignoredNodes: Set<AST.Node>;
 	options: ParserOptions;
+	// Where each paragraph’s printed lines and its container’s content start
+	paragraphEdges: Map<
+		AST.Node,
+		Pick<AST.InlineLayout, 'containerEdge' | 'contentEdge'>
+	>;
 };
 
 const IGNORE_COMMENT_PATTERN =
@@ -81,6 +86,7 @@ export default async function preprocessMarkdown(
 		fragments: new Set(context.fragments.map(({ node }) => node)),
 		ignoredNodes,
 		options,
+		paragraphEdges: new Map(),
 	};
 
 	await formatScopes(
@@ -96,15 +102,14 @@ export default async function preprocessMarkdown(
 		state
 	);
 
-	for (const fragment of context.fragments) {
-		if (!fragment.isBlock && !ignoredNodes.has(fragment.node)) {
-			await formatInlineHTML(
-				fragment,
-				analysis.protectedStarts.has(fragment.node),
-				options,
-				formattedHTMLNodes
-			);
-		}
+	for (const fragments of groupInlineFragments(context, ignoredNodes)) {
+		await formatInlineHTML(
+			fragments,
+			getInlineLayout(fragments[0]!, context, state),
+			analysis.protectedStarts,
+			options,
+			formattedHTMLNodes
+		);
 	}
 
 	return root;
@@ -134,7 +139,18 @@ async function formatScopes(
 			continue;
 		}
 
-		if (child.type === 'blockquote') {
+		// Prettier indents an item’s later children like nested lists, and
+		// aligns a task item’s first child after its checkbox
+		if (child.type === 'paragraph') {
+			state.paragraphEdges.set(child, {
+				containerEdge: layout.prefixWidth,
+				contentEdge:
+					layout.prefixWidth +
+					(index > 0
+						? nestingIndentation
+						: getCheckboxWidth(container)),
+			});
+		} else if (child.type === 'blockquote') {
 			await formatScopes(
 				child,
 				{
@@ -182,6 +198,66 @@ async function formatScopes(
 		},
 		options
 	);
+}
+
+/**
+ * Returns the width of the checkbox that Prettier prints for a task list item,
+ * including the space after it.
+ */
+function getCheckboxWidth(container: AST.Node): number {
+	return typeof (container as { checked?: unknown }).checked === 'boolean'
+		? 4
+		: 0;
+}
+
+/**
+ * Groups the inline fragments that formatting reaches by the paragraph,
+ * heading, or table cell around them, in document order. Their layouts depend
+ * on one another within a paragraph.
+ */
+function groupInlineFragments(
+	context: AST.DocumentContext,
+	ignoredNodes: ReadonlySet<AST.Node>
+): AST.Fragment[][] {
+	const groups = new Map<AST.Node, AST.Fragment[]>();
+
+	for (const fragment of context.fragments) {
+		if (fragment.isBlock || ignoredNodes.has(fragment.node)) {
+			continue;
+		}
+
+		const key = fragment.block ?? fragment.node;
+		const group = groups.get(key);
+
+		if (group) {
+			group.push(fragment);
+		} else {
+			groups.set(key, [fragment]);
+		}
+	}
+
+	return [...groups.values()];
+}
+
+/**
+ * Returns the layout of the paragraph around an inline fragment, if formatting
+ * reached that paragraph.
+ */
+function getInlineLayout(
+	fragment: AST.Fragment,
+	context: AST.DocumentContext,
+	state: ScopeState
+): AST.InlineLayout | undefined {
+	const paragraph = fragment.block;
+	const edges = paragraph && state.paragraphEdges.get(paragraph);
+
+	return edges
+		? {
+				...edges,
+				containers: context.enclosingContainers.get(paragraph) ?? [],
+				paragraph,
+			}
+		: undefined;
 }
 
 /**
