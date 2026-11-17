@@ -1,7 +1,3 @@
-> [!NOTE]
->
-> This specification is a work in progress. It describes the intended formatting rules, which the current plugin doesn’t fully implement yet.
-
 # Formatting Specification
 
 This specification defines how `prettier-plugin-markdown-html` formats Markdown and HTML, and when it reports an error.

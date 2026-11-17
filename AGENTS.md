@@ -10,7 +10,7 @@
 | Source | Authority and Ownership |
 | --- | --- |
 | `AGENTS.md` | Defines project instructions, scope, and documentation authority. Applicable project instructions override global defaults. |
-| `SPEC.md` | Defines the intended formatting contract. Its opening note states the implementation status. |
+| `SPEC.md` | Defines the formatting contract. |
 
 ## Specification Work
 
