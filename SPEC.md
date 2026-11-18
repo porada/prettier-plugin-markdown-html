@@ -290,11 +290,11 @@ For a given input, formatter version, and effective configuration, the following
 
 1. The reference profile establishes the source’s interpretation and document context. Prettier’s HTML parsing and the content protection rules determine protected content. Configuration and Prettier’s directive matching determine formatting controls. The input acceptance rules apply, including rejection of partial generated elements inside opaque tokens. Errors thrown by parsers, formatters, or required integrations propagate.
 2. Prettier supplies the initial Markdown and HTML formatting, including accepted normalization and required closing tags. Layout accounts for the actual HTML ancestors and available line width. Doctype keyword casing follows [Non-Element Markup](#non-element-markup).
-3. The required container prefixes, HTML indentation, and blank lines are applied at boundaries. GFM’s start and end markers remain recognizable. A marker or complete tag that needs one physical line uses Prettier’s syntax for that layout without changing significant content. A block whose first tag needs to stand apart from its content uses the expanded layout.
-4. Line breaks within inline tag syntax follow Prettier where they preserve Markdown interpretation. A bracket or end marker rejoins its tag if the break would create Markdown structure. Another unsafe break inside a tag puts the complete tag on one physical line. Removed breaks use the spacing Prettier would use without wrapping. Outside tag syntax, breaks follow the Markdown formatter and `proseWrap`, including between adjacent tags. The exception is a break that would turn inline HTML, including a comment, into an HTML block. That break rejoins the HTML to preceding inline content even if the Markdown formatter introduced it. Hard line breaks and protected content remain intact.
+3. HTML blocks receive the required [container prefixes and indentation](#indentation-across-fragments), [blank lines](#blank-lines-at-boundaries), and [block boundary adjustments](#block-boundaries).
+4. Inline HTML receives the [wrapping and boundary adjustments](#inline-html) that preserve its Markdown context.
 5. The resulting layout satisfies preservation, stability, and the applicable ignore and range constraints within the [formatting scope](#formatting-scope). If any condition remains unmet, formatting reports an error. It doesn’t select another layout, leave a region unformatted as a fallback, or rely on a later pass to repair the result.
 
-The single physical line required by a heading or table row takes precedence over optional inline wrapping. Normalized declarations and tags retain their GFM interpretation. The defined adjustments can exceed the preferred width or override attribute and bracket preferences, but allow no other reflow of Markdown or HTML.
+Normalized declarations and tags retain their GFM interpretation. The defined adjustments can exceed the preferred width or override attribute and bracket preferences, but allow no other reflow of Markdown or HTML.
 
 These rules define observable output without prescribing a parsing or printing architecture.
 
@@ -302,7 +302,7 @@ These rules define observable output without prescribing a parsing or printing a
 
 Each HTML block starts at its surrounding Markdown container’s content edge. At the document root, it has no leading indentation. Within a block quote or list item, it retains the markers and continuation indentation supplied by Prettier’s Markdown layout.
 
-A standalone `<!-- prettier-ignore -->` comment indented past the content edge is an exception: the plugin preserves its indentation, matching plain Prettier. Prettier’s Markdown printer recognizes the directive only when the HTML node’s value is exactly `<!-- prettier-ignore -->`. Extra indentation, as in ` <!-- prettier-ignore -->` at the root or `>  <!-- prettier-ignore -->` in a block quote, prevents that match, so the following HTML is still formatted. Moving the comment to the content edge would make it a directive on the next pass and protect the following Markdown node.
+A standalone `prettier-ignore`, `prettier-ignore-start`, or `prettier-ignore-end` HTML comment indented past the content edge is an exception: the plugin preserves its indentation, matching plain Prettier. Leading whitespace in the HTML node’s value prevents Prettier’s Markdown printer from recognizing the comment as a directive. For example, ` <!-- prettier-ignore -->` at the root and `>  <!-- prettier-ignore -->` in a block quote don’t protect the following Markdown node. Moving an indented comment to the content edge could activate a directive on the next pass and change which source is protected.
 
 Subsequent HTML lines are indented for their raw HTML ancestors, including ancestors opened in earlier fragments or outside the current Markdown container. Wrappers generated from Markdown add no HTML indentation because the container’s prefixes and continuation indentation already represent their layout. Moving the first line to the content edge leaves later lines at their original nesting depth. Protected spaces remain intact even when they prevent moving that first line.
 
@@ -314,7 +314,7 @@ Exactly one blank line separates an HTML block from an adjacent Markdown block w
 
 A boundary stays unpadded when adding a blank line would turn a tight list into a loose one. One blank line remains when it preserves an existing loose list or terminates an HTML block. Significant whitespace remains protected. If no permitted boundary preserves the interpretation, formatting reports an error.
 
-For lists whose content or layout is affected by HTML formatting, tightness follows the reference profile, including the effect of blank lines inside HTML blocks. Blank lines don’t move across HTML block or list item boundaries to obtain another layout. The same boundary rules govern trailing blank lines when a block reaches the end of its container. Output that remains unstable after those adjustments produces an error. Suppressing or relocating a separator between loose list items is not an additional stabilization step. A processing instruction that absorbs the following separator and keeps gaining blank lines on each pass therefore produces an error.
+For lists whose content or layout is affected by HTML formatting, tightness follows the reference profile, including the effect of blank lines inside HTML blocks. Blank lines don’t move across HTML block or list item boundaries to obtain another layout. The same boundary rules govern trailing blank lines when a block reaches the end of its container. Output that remains unstable after those adjustments produces an error. Suppressing or relocating a separator between loose list items is not an additional stabilization step.
 
 Adjacent HTML blocks keep a separating blank line when removing it would change their GFM interpretation. That separation reduces to one blank line unless its content is protected. Other spacing within HTML follows Prettier.
 
@@ -412,7 +412,7 @@ When a tag needs a separate line but Prettier would otherwise fit the element on
 
 A resumed block’s first line establishes the HTML block that later indented lines depend on. Moving or splitting its start can’t leave those lines outside the block.
 
-Each required end marker stays on one physical line, including raw text closing tags, `-->`, `?>`, and `]]>`. A declaration’s `>` keeps its terminating role. Splitting `</script>` into `</script` and `>`, for example, would let the HTML block consume following Markdown and is therefore forbidden. Start markers remain recognizable in the same way when their spelling or position determines block recognition.
+Each required end marker stays on one physical line, including raw text closing tags, `-->`, `?>`, and `]]>`. A declaration’s `>` keeps its terminating role. Splitting `</script>` into `</script` and `>`, for example, would let the HTML block consume following Markdown and is therefore forbidden. Start markers remain recognizable in the same way when their spelling or position determines block recognition. A marker or complete tag that needs one physical line uses Prettier’s syntax for that layout without changing significant content.
 
 Other line breaks follow Prettier while preserving the block. A break can’t expose HTML content as Markdown or turn a following line into indented code. If the permitted boundary and indentation adjustments can’t preserve that interpretation, formatting reports an error.
 
@@ -420,9 +420,11 @@ Other line breaks follow Prettier while preserving the block. A break can’t ex
 
 Inline HTML stays in its original paragraph, heading, table cell, link, or other inline context. Its relationship with Markdown content remains intact, including text immediately before and after each tag. Inline fragments receive no padding.
 
-Inline tags use Prettier’s HTML layout and the effective fragment options where GFM permits them. Layout accounts for the tag’s position in the formatted Markdown line, including preceding text and container prefixes, and for attached content through the next break opportunity in Prettier’s HTML layout. Breaks inside tag syntax are independent of `proseWrap`. Surrounding Markdown follows its own formatter. Wrapped attribute lines are indented one level from the paragraph’s printed content edge, where Prettier starts its continuation lines. Markdown structure is assessed from the surrounding container’s GFM content edge. A closing bracket attaches to the last attribute line when a separate line would create Markdown structure.
+Inline tags use Prettier’s HTML layout and the effective fragment options where GFM permits them. Layout accounts for the tag’s position in the formatted Markdown line, including preceding text and container prefixes, and for attached content through the next break opportunity in Prettier’s HTML layout. Wrapped attribute lines are indented one level from the paragraph’s printed content edge, where Prettier starts its continuation lines. Markdown structure is assessed from the surrounding container’s GFM content edge.
 
-Markdown content follows `proseWrap`. With `never`, prose stays unwrapped while HTML options continue to control tag layout. With every setting, inline HTML, including comments, stays out of positions that would start HTML blocks. When wrapping would cause that change, the boundary adjustment in [Formatting Decisions](#formatting-decisions) applies. Existing hard line breaks and protected source remain intact.
+Line breaks within tag syntax follow Prettier where they preserve Markdown interpretation, independently of `proseWrap`. A bracket or end marker rejoins its tag if the break would create Markdown structure. Another unsafe break inside a tag puts the complete tag on one physical line. Removed breaks use the spacing Prettier would use without wrapping.
+
+Outside tag syntax, breaks follow the Markdown formatter and `proseWrap`, including between adjacent tags. The exception is a break that would turn inline HTML, including a comment, into an HTML block. That break rejoins the HTML to preceding inline content even if the Markdown formatter introduced it. Hard line breaks and protected content remain intact. With `never`, prose stays unwrapped while HTML options continue to control tag layout.
 
 Every line break introduced by HTML layout preserves the surrounding Markdown construct. It can’t introduce a heading, block quote, fence, thematic break, list item, HTML block, setext underline, or table delimiter row. The reference profile’s interruption rules govern this distinction, with the actual container prefixes and indentation.
 
@@ -455,7 +457,7 @@ foo<span title="bar" data-description="baz" data-label="qux" data-value="quux"
 </p>
 ```
 
-Inline HTML and surrounding content stay on one physical line wherever the Markdown construct requires it, including ATX headings and GFM table rows. Tag syntax stays on that line, ahead of width, bracket placement, and one attribute per line preferences, including fragment overrides. Attribute values and significant content remain intact. A tag that can’t fit on one physical line without changing them produces an error.
+Inline HTML and surrounding content stay on one physical line wherever the Markdown construct requires it, including ATX headings and GFM table rows. Tag syntax stays on that line, ahead of width, bracket placement, and one attribute per line preferences, including fragment overrides. Attribute values and significant content remain intact.
 
 Table escaping belongs to Markdown syntax. The reference profile’s table extension processes `\|` before HTML interpretation. Formatting applies to the resulting HTML value, with the escapes needed to keep each pipe in its original cell retained in the source. No formatted pipe becomes a cell separator or changes the decoded attribute value.
 
@@ -541,7 +543,7 @@ Prettier controls file exclusions and pragma options. A file it skips entirely n
 
 ### Range Formatting
 
-Range formatting follows Prettier’s selected parser and range, with preservation requirements applying within the [formatting scope](#formatting-scope). When Prettier makes no Markdown edits for that operation, accepted input returns unchanged after HTML validation. The stability guarantee for complete documents doesn’t require formatting the remainder during a range operation.
+Range formatting follows Prettier’s selected parser and range, with preservation requirements applying within the [formatting scope](#formatting-scope). When Prettier makes no Markdown edits for that operation, accepted input returns unchanged after HTML validation, apart from Prettier’s line ending normalization. The [reference Prettier version](#example-options) makes no Markdown edits for partial ranges. The stability guarantee for complete documents doesn’t require formatting the remainder during a range operation.
 
 Unless Prettier skips the file, HTML validation covers the complete document, including content outside the range. An edit needed to preserve the interpretation of changes made within the range is a required edit. If that edit lies beyond the range Prettier permits, formatting reports an error. Unformatted content elsewhere doesn’t, by itself, require an edit.
 

@@ -2033,6 +2033,20 @@ describe('Indentation Across Fragments', () => {
 			output
 		);
 	});
+
+	test('keeps the indentation of range ignore comments that Prettier doesn’t honor', async () => {
+		const input =
+			' <!-- prettier-ignore-start -->\n\n<div   >foo</div>\n\n <!-- prettier-ignore-end -->\n';
+		const expectedOutput =
+			' <!-- prettier-ignore-start -->\n\n<div>foo</div>\n\n <!-- prettier-ignore-end -->\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
 });
 
 describe('Blank Lines at Boundaries', () => {
