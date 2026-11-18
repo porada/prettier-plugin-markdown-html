@@ -12,6 +12,8 @@ Malformed HTML produces an error. The same applies when the required formatting 
 
 Outside the [parser disagreement limits](#parser-disagreement), other Markdown follows Prettier. Differences or defects in Prettier’s parsers and printers, or quirks of the reference renderer, require no detection, repair, or additional error when their effects stay outside the formatting scope. This upstream exception includes changes in meaning and instability.
 
+When text in a paragraph or setext heading immediately precedes or follows a math block, the formatting, preservation, and error rules have a [block math exception](#block-math-inside-paragraphs).
+
 The [reference profile](#gfm-profile) defines the GFM interpretation that formatting preserves.
 
 ## Formatting Scope
@@ -67,7 +69,7 @@ Other Prettier plugins can format unrelated languages. A replacement for the Mar
 
 ### Parser Disagreement
 
-Prettier’s Markdown parser can assign source a different role from the reference profile. The reference profile still determines what is raw HTML, Markdown, or literal content. The acceptance limits below keep those disagreements from compromising formatting or document context. They can produce an unsupported Markdown error even when the HTML is well-formed or the reference profile finds only literal text.
+Prettier’s Markdown parser can assign source a different role from the reference profile. The reference profile still determines what is raw HTML, Markdown, or literal content. Apart from the [block math exception](#block-math-inside-paragraphs), the acceptance limits below keep those disagreements from compromising formatting or document context. They can produce an unsupported Markdown error even when the HTML is well-formed or the reference profile finds only literal text.
 
 Frontmatter, math, Liquid tags, and wiki links follow Prettier outside the [formatting scope](#formatting-scope). When Prettier reads source as one of these constructs and the reference profile recognizes raw HTML within it, formatting reports an unsupported Markdown error. The plugin doesn’t rewrite that HTML or return the construct unchanged as a fallback. This restriction follows Prettier’s classification, not the delimiters alone. For example, single-dollar text remains ordinary Markdown when Prettier doesn’t recognize it as math.
 
@@ -91,6 +93,22 @@ For a block that the reference profile reads entirely as Markdown text, support 
 - For a multi-line block, a block quote or list item marker on a later line, or a fence left open at the end of the block, extends the check to the rest of the document. Markers inside a fence that the block opens and closes don’t count. Markers count even where GFM would read them as text or a thematic break.
 
 Where a check extends to the rest of the document, a raw HTML token or HTML block start anywhere later makes the arrangement unsupported. These are conservative source checks, not a reconstruction of GFM’s paragraph and container boundaries. The same syntax counts even when an escape, code span, or code block would make it literal. The plugin neither validates nor formats that literal sequence as HTML. If a check fails, the combination produces an unsupported Markdown error. Otherwise, Prettier formats the block, subject to the applicable content protection rules.
+
+#### Block Math Inside Paragraphs
+
+Prettier can separate a `$$` math block from the text immediately before or after it, even when the reference profile reads those lines as one paragraph. A setext underline turns that paragraph into a heading. If the underline lies inside the math, a blank line before the opening `$$` can move preceding HTML into a paragraph. The heading then starts at the opening `$$`. If text comes between the closing `$$` and the underline, only that text may remain in the heading after formatting. If the underline immediately follows the closing `$$`, formatting can leave it on its own and move the preceding HTML into a paragraph. A standalone underline of equals signs renders as literal paragraph text regardless of length. A single hyphen renders as an empty list item, two hyphens as literal paragraph text, and three or more as a thematic break.
+
+The plugin reads the math block’s source on its own and reports an unsupported Markdown error if it recognizes a complete raw HTML token there. This includes tags, HTML comments, CDATA sections, declarations, and processing instructions. The error still applies when inline syntax crossing a math boundary makes that markup literal in the full paragraph or heading, as can happen in a code span, an HTML comment, a link title, or a quoted attribute value. An opening or closing tag counts even when its element crosses a boundary. A token that crosses one or both boundaries does not itself trigger that error. The same holds for other inline syntax that crosses a boundary, such as code spans and links.
+
+When inline syntax crosses a math boundary, the plugin reads each of Prettier’s blocks on its own. It validates and formats what it reads as raw HTML in that block, even when the reference profile treats the same markup as text inside a code span, an HTML comment, a link title, or a quoted attribute value. If an element’s opening and closing tags fall on opposite sides of the math, or a quoted attribute value crosses either boundary of the math block, formatting can report a malformed HTML error even when the reference profile reads a well-formed element or displays the tags as literal code. An unclosed tag in a link destination or title can produce the same error.
+
+The reference profile can read a line without the list item’s indentation or the block quote’s `>` marker as a lazy continuation of the same paragraph. Prettier can close the container before that line. If the math starts on a lazy continuation line, both the math and the following text can move outside the container. If only the following text omits the prefix, the math can stay inside while that text moves outside.
+
+The reference profile can also open a block quote or list item inside the math and read text after the closing `$$` as a lazy continuation. Prettier reads the marker as part of the math. A blank line after the math can then move the following text and any raw HTML it contains outside that container.
+
+At the document root and directly inside a block quote, Prettier separates the math from adjacent text with a blank line. When Prettier keeps the math and text in the same list item, even one nested in a block quote, it adds that spacing only when a blank line separates two of the item’s own blocks or separates the item from the next item in the same list. Without either blank line, the math and text within that item stay together, as they do in a tight list.
+
+When blank lines split a raw HTML token, the pieces can render as literal text without a formatting error. This can reveal the contents of a comment or display the source of a tag split inside a quoted attribute value. The breaks can also expose a tag that was displayed as code or hidden inside a comment, so it renders as an element. If they break a link, an element in its text loses its enclosing anchor. When the lines stay together, a code span or comment can survive, though formatting a tag inside it can still change the displayed code or the comment’s text. Quotes added around an HTML attribute value can still close a link title early and break the link.
 
 ## Input Acceptance
 
@@ -565,7 +583,7 @@ Each error identifies the plugin and includes the file path when supplied. Error
 
 ## Conformance
 
-The following comparisons apply within the [formatting scope](#formatting-scope). The complete document context still determines the content, ancestry, and boundaries of raw HTML.
+The following comparisons apply within the [formatting scope](#formatting-scope). The first two comparisons allow the differences described by the [block math exception](#block-math-inside-paragraphs). The complete document context still determines the content, ancestry, and boundaries of raw HTML.
 
 1. The input and output agree under the reference profile in their Markdown structures, container relationships, list tightness, inline relationships, hard breaks, and division between Markdown, raw HTML, and literal content. Raw HTML added by the specified closing tag completion is exempt from this comparison, while the original content retains its structure and interpretation. Source positions and Prettier’s normal syntax choices are excluded, including soft breaks allowed by `proseWrap` and formatting within supported code fences. Other normalization preserves the reference interpretation and significant content within this scope.
 2. Within that scope, the input and output document contexts agree in elements, content ownership, attribute values, and significant text after Prettier’s accepted normalization and the specified closing tag completion. Comments, raw text, preformatted content, and ignored source retain their required content. Embedded language changes follow the selected formatter and options.

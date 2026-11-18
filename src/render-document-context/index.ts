@@ -1038,7 +1038,7 @@ function renderReferenceReading(
 			reportUnsupportedMarkdown({
 				filepath: state.options.filepath,
 				position: node.position?.start,
-				reason: `Prettier’s Markdown parser reads this as ${reading.description}, but GitHub Flavored Markdown recognizes raw HTML within it`,
+				reason: `Prettier’s Markdown parser reads this as ${reading.description}, but GitHub Flavored Markdown can read raw HTML within it`,
 			});
 		}
 

@@ -64,7 +64,7 @@ describe('Parser Disagreement', () => {
 			.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
 
-			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown recognizes raw HTML within it]
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
 		`);
 	});
 
@@ -84,7 +84,7 @@ describe('Parser Disagreement', () => {
 		).rejects.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
 
-			Prettier’s Markdown parser reads this as frontmatter, but GitHub Flavored Markdown recognizes raw HTML within it]
+			Prettier’s Markdown parser reads this as frontmatter, but GitHub Flavored Markdown can read raw HTML within it]
 		`);
 	});
 
@@ -867,7 +867,7 @@ describe('Parser Disagreement', () => {
 			.rejects.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
 
-			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown recognizes raw HTML within it]
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
 		`);
 	});
 
@@ -888,7 +888,7 @@ describe('Parser Disagreement', () => {
 			.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
 
-			Prettier’s Markdown parser reads this as a Liquid tag, but GitHub Flavored Markdown recognizes raw HTML within it]
+			Prettier’s Markdown parser reads this as a Liquid tag, but GitHub Flavored Markdown can read raw HTML within it]
 		`);
 	});
 
@@ -897,7 +897,7 @@ describe('Parser Disagreement', () => {
 			.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
 
-			Prettier’s Markdown parser reads this as a wiki link, but GitHub Flavored Markdown recognizes raw HTML within it]
+			Prettier’s Markdown parser reads this as a wiki link, but GitHub Flavored Markdown can read raw HTML within it]
 		`);
 	});
 
@@ -936,7 +936,7 @@ describe('Parser Disagreement', () => {
 			.rejects.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
 
-			Prettier’s Markdown parser reads this as a footnote definition, but GitHub Flavored Markdown recognizes raw HTML within it]
+			Prettier’s Markdown parser reads this as a footnote definition, but GitHub Flavored Markdown can read raw HTML within it]
 		`);
 	});
 
@@ -1691,6 +1691,536 @@ describe('Parser Disagreement', () => {
 	test('formats raw HTML after text that only Prettier reads as HTML when a blank line separates it from a preceding list item', async () => {
 		const input = '- foo\n\n<!doctype html>\n\n  <b   >bar</b>\n';
 		const expectedOutput = '- foo\n\n<!doctype html>\n\n<b>bar</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+});
+
+describe('Block Math Inside Paragraphs', () => {
+	test('rejects raw HTML entirely inside block math that continues a paragraph', async () => {
+		await expect(
+			format('foo\n$$\nbar <b>baz</b>\n$$\nqux\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format('foo\n$$\nbar <!-- baz -->\n$$\nqux\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format(
+				'foo\n$$\nbar <![CDATA[ baz ]]>\n$$\nqux\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format('foo\n$$\nbar <!X baz>\n$$\nqux\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format('foo\n$$\nbar <?baz?>\n$$\nqux\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+	});
+
+	test('rejects a tag inside block math when its element crosses the math', async () => {
+		await expect(
+			format(
+				'foo <span>bar\n$$\nbaz</span>\n$$\nqux\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format(
+				'foo\n$$\nbar <span>baz\n$$\nqux</span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+	});
+
+	test('rejects markup inside block math even when syntax crossing the math makes it literal', async () => {
+		await expect(
+			format(
+				'foo `bar\n$$\n<b>baz</b>\n$$\n` qux\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format('foo `bar\n$$\n<b>baz</b>`\n$$\nqux\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format(
+				'foo <!--\n$$\n<b>bar</b>\n$$\n--> baz\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format(
+				'[foo](/bar "baz\n$$\n<b>qux</b>\n$$\nquux")\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+		await expect(
+			format(
+				'foo <span title="bar\n$$\n<b>baz</b>\n$$\nqux">quux</span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it]
+		`);
+	});
+
+	test('formats a tag in a code span that crosses block math', async () => {
+		const input = 'foo `<br   >\n$$\nbar`\n$$\nbaz\n';
+		const expectedOutput = 'foo `<br />\n\n$$\nbar`\n$$\n\nbaz\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses from block math into the following text', async () => {
+		const input = '$$\n`foo\n$$\n<br   >` bar\n';
+		const expectedOutput = '$$\n`foo\n$$\n\n<br />` bar\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in an HTML comment that crosses block math', async () => {
+		const input = 'foo <!--\n$$\nbar\n$$\n<br   > -->\n';
+		const expectedOutput = 'foo <!--\n\n$$\nbar\n$$\n\n<br /> -->\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a paragraph with an HTML comment that crosses the end of block math', async () => {
+		const input = 'foo\n$$\nbar <!--\n$$\nbaz --> qux\n';
+		const expectedOutput = 'foo\n\n$$\nbar <!--\n$$\n\nbaz --> qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a paragraph with a tag that spans block math', async () => {
+		const input = 'foo <span title="bar\n$$\nbaz\n$$\nqux">quux\n';
+		const expectedOutput =
+			'foo <span title="bar\n\n$$\nbaz\n$$\n\nqux">quux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML in a link that crosses block math', async () => {
+		const input = '[<b   >foo</b>\n$$\nbar\n$$\n](/baz)\n';
+		const expectedOutput = '[<b>foo</b>\n\n$$\nbar\n$$\n\n](/baz)\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in a setext heading', async () => {
+		const input = 'foo `<b   >bar</b>\n$$\nbaz\n$$\n` qux\n===\n';
+		const expectedOutput = 'foo `<b>bar</b>\n\n$$\nbaz\n$$\n\n` qux\n===\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test.each(['===', '-', '--', '---'])(
+		'formats raw HTML in a setext heading whose %s underline directly follows block math',
+		async (underline) => {
+			const input = `<b   >foo</b>\n$$\nbar\n$$\n${underline}\n`;
+			const expectedOutput = `<b>foo</b>\n\n$$\nbar\n$$\n\n${underline}\n`;
+
+			const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('formats raw HTML in a setext heading whose underline falls inside block math', async () => {
+		const input = '<b   >foo</b>\n$$\nbar\n===\n$$\nbaz\n';
+		const expectedOutput = '<b>foo</b>\n\n$$\nbar\n===\n$$\n\nbaz\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects an element whose tags fall on opposite sides of block math', async () => {
+		await expect(
+			format(
+				'foo <span>bar\n$$\nbaz\n$$\nqux</span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (1:5):
+
+			This \`<span>\` element is still open when the surrounding paragraph ends]
+		`);
+		await expect(
+			format(
+				'foo `<span>bar\n$$\nbaz\n$$\nqux</span>`\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (1:6):
+
+			This \`<span>\` element is still open when the surrounding paragraph ends]
+		`);
+	});
+
+	test('rejects a quoted attribute value that crosses block math', async () => {
+		await expect(
+			format(
+				'foo <span title="bar\n$$\nbaz">qux\n$$\nquux</span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (5:5):
+
+			Unexpected closing tag "span". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags]
+		`);
+		await expect(
+			format(
+				'foo\n$$\nbar <span title="baz\n$$\nqux">quux</span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (5:10):
+
+			Unexpected closing tag "span". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags]
+		`);
+		await expect(
+			format(
+				'foo <span title="bar\n$$\nbaz\n$$\nqux">quux</span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (5:10):
+
+			Unexpected closing tag "span". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags]
+		`);
+	});
+
+	test('rejects an unclosed tag in the destination or title of a link that crosses block math', async () => {
+		await expect(
+			format(
+				'[foo\n$$\nbar\n$$\nbaz](/qux "<b>")\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (5:12):
+
+			This \`<b>\` element is still open when the surrounding paragraph ends]
+		`);
+		await expect(
+			format('[foo\n$$\nbar\n$$\nbaz](/qux<b>)\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML (5:10):
+
+			This \`<b>\` element is still open when the surrounding paragraph ends]
+		`);
+	});
+
+	test('formats a tag in a code span that crosses block math in a block quote', async () => {
+		const input = '> foo `<b   >bar</b>\n> $$\n> baz\n> $$\n> ` qux\n';
+		const expectedOutput =
+			'> foo `<b>bar</b>\n>\n> $$\n> baz\n> $$\n>\n> ` qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math on lazy continuation lines of a block quote', async () => {
+		const input = '> foo `<b   >bar</b>\n$$\nbaz\n$$\n` qux\n';
+		const expectedOutput = '> foo `<b>bar</b>\n\n$$\nbaz\n$$\n\n` qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math into a lazy continuation line of a block quote', async () => {
+		const input = '> foo `<b   >bar</b>\n> $$\n> baz\n> $$\n` qux\n';
+		const expectedOutput =
+			'> foo `<b>bar</b>\n>\n> $$\n> baz\n> $$\n\n` qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math on lazy continuation lines of a list item', async () => {
+		const input = '- foo `<b   >bar</b>\n$$\nbaz\n$$\n` qux\n';
+		const expectedOutput = '- foo `<b>bar</b>\n\n$$\nbaz\n$$\n\n` qux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML on a lazy continuation line of a block quote after block math', async () => {
+		const input = '> foo\n$$\nbar\n$$\n<b   >baz</b>\n';
+		const expectedOutput = '> foo\n\n$$\nbar\n$$\n\n<b>baz</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML on a lazy continuation line of a block quote that starts inside block math', async () => {
+		const input = 'foo\n$$\n> bar\n$$\n<b   >baz</b>\n';
+		const expectedOutput = 'foo\n\n$$\n> bar\n$$\n\n<b>baz</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML on a lazy continuation line of a list item that starts inside block math', async () => {
+		const input = 'foo\n$$\n- bar\n$$\n<b   >baz</b>\n';
+		const expectedOutput = 'foo\n\n$$\n- bar\n$$\n\n<b>baz</b>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in a list item separated from the next item by a blank line', async () => {
+		const input =
+			'- foo `<b   >bar</b>\n  $$\n  baz\n  $$\n  ` qux\n\n- quux\n';
+		const expectedOutput =
+			'- foo `<b>bar</b>\n\n    $$\n    baz\n    $$\n\n    ` qux\n\n- quux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in a list item with a blank line between its blocks', async () => {
+		const input =
+			'- foo `<b   >bar</b>\n  $$\n  baz\n  $$\n  ` qux\n\n  quux\n';
+		const expectedOutput =
+			'- foo `<b>bar</b>\n\n    $$\n    baz\n    $$\n\n    ` qux\n\n    quux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in a list item nested in a block quote', async () => {
+		const input =
+			'> - foo `<b   >bar</b>\n>   $$\n>   baz\n>   $$\n>   ` qux\n>\n> - quux\n';
+		const expectedOutput =
+			'> - foo `<b>bar</b>\n>\n>     $$\n>     baz\n>     $$\n>\n>     ` qux\n>\n> - quux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in a tight list item', async () => {
+		const input =
+			'- foo `<b   >bar</b>\n  $$\n  baz\n  $$\n  ` qux\n- quux\n';
+		const expectedOutput =
+			'- foo `<b>bar</b>\n    $$\n    baz\n    $$\n    ` qux\n- quux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in a tight list item nested in a block quote', async () => {
+		const input =
+			'> - foo `<b   >bar</b>\n>   $$\n>   baz\n>   $$\n>   ` qux\n> - quux\n';
+		const expectedOutput =
+			'> - foo `<b>bar</b>\n>     $$\n>     baz\n>     $$\n>     ` qux\n> - quux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in a list item followed by a paragraph', async () => {
+		const input =
+			'- foo `<b   >bar</b>\n  $$\n  baz\n  $$\n  ` qux\n\nquux\n';
+		const expectedOutput =
+			'- foo `<b>bar</b>\n    $$\n    baz\n    $$\n    ` qux\n\nquux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in a nested list item followed by a blank line and an item of the parent list', async () => {
+		const input =
+			'- foo\n  - bar `<b   >baz</b>\n    $$\n    qux\n    $$\n    ` quux\n\n- corge\n';
+		const expectedOutput =
+			'- foo\n    - bar `<b>baz</b>\n        $$\n        qux\n        $$\n        ` quux\n\n- corge\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in a code span that crosses block math in the last item of a loose list', async () => {
+		const input =
+			'- foo\n\n- bar `<b   >baz</b>\n  $$\n  qux\n  $$\n  ` quux\n';
+		const expectedOutput =
+			'- foo\n\n- bar `<b>baz</b>\n    $$\n    qux\n    $$\n    ` quux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in an HTML comment that crosses block math in a tight list item', async () => {
+		const input =
+			'- foo <!-- <b   >bar</b>\n  $$\n  baz\n  $$\n  --> qux\n- quux\n';
+		const expectedOutput =
+			'- foo <!-- <b>bar</b>\n    $$\n    baz\n    $$\n    --> qux\n- quux\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats a tag in the title of a link that crosses block math in a tight list item', async () => {
+		const input =
+			'- [foo\n  $$\n  bar\n  $$\n  baz](/qux "<b title = quux></b>")\n- corge\n';
+		const expectedOutput =
+			'- [foo\n    $$\n    bar\n    $$\n    baz](/qux "<b title="quux"></b>")\n- corge\n';
 
 		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
 
@@ -5638,7 +6168,7 @@ describe('Range Formatting', () => {
 		expect(message).toMatchInlineSnapshot(`
 			"[prettier-plugin-markdown-html] Unsupported Markdown (3:1):
 
-			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown recognizes raw HTML within it
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read raw HTML within it
 			  1 | foo
 			  2 |
 			> 3 | $$
