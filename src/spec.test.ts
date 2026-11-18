@@ -275,6 +275,365 @@ describe('Parser Disagreement', () => {
 		);
 	});
 
+	test('rejects raw HTML that a backtick in math places in a code span', async () => {
+		await expect(
+			format(
+				'foo $$`$$ bar <span   >baz</span> `\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby]
+		`);
+	});
+
+	test('rejects raw HTML that a backtick in a Liquid tag places in a code span', async () => {
+		await expect(
+			format(
+				'foo {% ` %} bar <span   >baz</span> `\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			Prettier’s Markdown parser reads this as a Liquid tag, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby]
+		`);
+	});
+
+	test('rejects raw HTML that a backtick in a wiki link places in a code span', async () => {
+		await expect(
+			format(
+				'foo [[`]] bar <span   >baz</span> `\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			Prettier’s Markdown parser reads this as a wiki link, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby]
+		`);
+	});
+
+	test('formats raw HTML after math with backticks paired inside it', async () => {
+		const input = 'foo $$`bar`$$ <span   >baz</span>\n';
+		const expectedOutput = 'foo $$`bar`$$ <span>baz</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML at the math whose backtick places it in a code span', async () => {
+		await expect(
+			format(
+				'foo [[bar]] baz $$`$$ <span   >qux</span> `\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:17):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby]
+		`);
+	});
+
+	test('rejects raw HTML that a comment starting in math contains', async () => {
+		await expect(
+			format(
+				'foo $$<!--$$ <span   >bar</span> -->\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby]
+		`);
+	});
+
+	test('rejects raw HTML that math in image text exposes', async () => {
+		await expect(
+			format('foo ![<i   >bar</i> $$`$$](/baz) `\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('formats raw HTML after math in a paragraph with an image reference', async () => {
+		const input =
+			'foo ![bar <i   >baz</i>][qux] $$`quux`$$ <em   >corge</em>\n\n[qux]: /grault\n';
+		const expectedOutput =
+			'foo ![bar <i   >baz</i>][qux] $$`quux`$$ <em>corge</em>\n\n[qux]: /grault\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after math whose backticks open a code span after it', async () => {
+		const input =
+			'foo $$bar\n```<span   >baz</span>$$ ```\n\n<div   >qux</div>\n';
+		const expectedOutput =
+			'foo $$bar\n```<span   >baz</span>$$ ```\n\n<div>qux</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML that a backtick in math in a footnote definition places in a code span', async () => {
+		await expect(
+			format(
+				'[^foo]: bar $$`$$ <span   >baz</span> `\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:13):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby]
+		`);
+	});
+
+	test('rejects raw HTML that a wiki link in image text exposes', async () => {
+		await expect(
+			format('foo ![<i   >bar</i> [[`]]](/baz) `\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('rejects raw HTML at the construct with an unpaired backtick', async () => {
+		await expect(
+			format(
+				'foo $$`bar`$$ [[`]] <span   >baz</span> `\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:15):
+
+			Prettier’s Markdown parser reads this as a wiki link, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby]
+		`);
+	});
+
+	test('formats raw HTML around math whose backticks place markup in a code span', async () => {
+		const input = '<span   >foo $$`<span   >bar</span>$$ `</span>\n';
+		const expectedOutput = '<span>foo $$`<span   >bar</span>$$ `</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after an escaped Liquid tag opener', async () => {
+		const input = 'foo \\{% <span   >bar</span> %}\n';
+		const expectedOutput = 'foo \\{% <span>bar</span> %}\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after math in a paragraph with a reference label containing a dollar sign', async () => {
+		const input =
+			'$$`foo`$$ ![bar <i   >baz</i>][qux$] <em   >quux</em>\n\n[qux$]: /corge\n';
+		const expectedOutput =
+			'$$`foo`$$ ![bar <i   >baz</i>][qux$] <em>quux</em>\n\n[qux$]: /corge\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML that a footnote reference hides from a link reference definition', async () => {
+		await expect(
+			format(
+				'foo ![<i   >bar</i>][^baz] $$`qux`$$ <em   >quux</em>\n\n[^baz]: /corge\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('rejects raw HTML that a footnote reference on several lines hides from a link reference definition', async () => {
+		await expect(
+			format(
+				'![foo <i   >bar</i>][^baz] <em   >qux</em>\n\n[^baz]:\n    /quux.png\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('rejects raw HTML next to a definition that only Prettier reads in a footnote definition', async () => {
+		await expect(
+			format(
+				'![<i   >foo</i>][bar] [^baz] <em   >qux</em>\n\n[^baz]: /quux\n\n    [bar]: /corge\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('rejects raw HTML that a footnote reference with a lazy destination line hides from a link reference definition', async () => {
+		await expect(
+			format(
+				'![foo <i   >bar</i>][^baz] <em   >qux</em>\n\n[^baz]:\n/quux.png\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('rejects raw HTML in a block quote that a footnote reference with a destination line hides from a link reference definition', async () => {
+		await expect(
+			format(
+				'> ![foo <i   >bar</i>][^baz] <em   >qux</em>\n>\n> [^baz]:\n> /quux.png\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('rejects raw HTML next to a definition that Prettier reads as footnote text', async () => {
+		await expect(
+			format(
+				'![foo <i   >bar</i>][baz] <em   >qux</em>\n\n[^quux]: corge\n[baz]: /grault.png\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('rejects raw HTML next to a definition that Prettier reads as frontmatter', async () => {
+		await expect(
+			format(
+				'---\n[foo]: /bar\n---\n\n![<i   >baz</i>][foo] <em   >qux</em>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (5:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('rejects raw HTML next to a definition on several lines that Prettier reads as frontmatter', async () => {
+		await expect(
+			format(
+				'---\n[foo]:\n  /bar\n---\n\n![<i   >baz</i>][foo] <em   >qux</em>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (6:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text]
+		`);
+	});
+
+	test('formats raw HTML next to a definition-like line in a code fence in frontmatter', async () => {
+		const options = { ...SPEC_EXAMPLE_OPTIONS, tabWidth: 2 };
+		const input =
+			'---\nfoo: |\n  ~~~\n  [bar]: /baz\n  ~~~\n---\n\n![<i   >qux</i>][bar] <em   >quux</em>\n';
+		const expectedOutput =
+			'---\nfoo: |\n  ~~~\n  [bar]: /baz\n  ~~~\n---\n\n![<i>qux</i>][bar] <em>quux</em>\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('formats raw HTML next to a definition and a footnote definition that a fence interrupts', async () => {
+		const input =
+			'![<i   >foo</i>][bar] [^baz] <em   >qux</em>\n\n[bar]: /quux\n\n[^baz]: /corge\n~~~\n\n~~~\n';
+		const expectedOutput =
+			'![<i   >foo</i>][bar] [^baz] <em>qux</em>\n\n[bar]: /quux\n\n[^baz]: /corge\n\n```\n\n```\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML at the construct with an unescaped backtick', async () => {
+		await expect(
+			format(
+				'foo $$\\`$$ [[`]] <span   >bar</span> `\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:12):
+
+			Prettier’s Markdown parser reads this as a wiki link, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby]
+		`);
+	});
+
+	test('keeps raw HTML in image text with nested brackets', async () => {
+		const input = '![[foo] <b   >bar</b>](baz.png)\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('formats raw HTML after math in a block quote with a definition on several lines', async () => {
+		const input =
+			'> $$`foo`$$ ![bar <i   >baz</i>][qux] <em   >quux</em>\n>\n> [qux]:\n> /corge\n';
+		const expectedOutput =
+			'> $$`foo`$$ ![bar <i   >baz</i>][qux] <em>quux</em>\n>\n> [qux]: /corge\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('keeps markup in a code span that crosses math on several lines', async () => {
+		const input = '<span>foo $$bar\n```<i   >baz</i>$$ ```</span>\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
 	test('rejects raw HTML after math that leaves a fence open even past a later closing fence', async () => {
 		await expect(
 			format(

@@ -59,9 +59,17 @@ export default async function checkReferenceReadings(
 			continue;
 		}
 
-		const formatted = await formatMarkdown(`${source}\n`, options, {
-			printWidth: options.printWidth - node.position!.start.column + 1,
-		});
+		// Prettier prints inline math as written, while formatting it alone
+		// could read it as block math
+		const formatted =
+			node.type === 'inlineMath'
+				? source
+				: await formatMarkdown(`${source}\n`, options, {
+						printWidth:
+							options.printWidth -
+							node.position!.start.column +
+							1,
+					});
 
 		const name = CONSTRUCT_NAMES[node.type] ?? 'Markdown';
 

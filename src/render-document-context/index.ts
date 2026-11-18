@@ -24,7 +24,7 @@ const CONTAINER_START_PATTERN =
 
 // A possible fence opening after up to three spaces. A backtick fence’s info
 // string can’t contain a backtick
-const FENCE_OPENING_PATTERN = /^ {0,3}(?:(`{3,})(?![^`]*`)|(~{3,}))/;
+export const FENCE_OPENING_PATTERN = /^ {0,3}(?:(`{3,})(?![^`]*`)|(~{3,}))/;
 
 // Constructs that Prettier reads as literal content, where the reference
 // renderer can open a code fence that stays open past their end. Inline math
@@ -41,7 +41,21 @@ const FENCE_READING_TYPES: ReadonlySet<string> = new Set([
 // renderer: `<!`, an uppercase name, ASCII whitespace, and the rest up to `>`
 const GFM_DECLARATION_PATTERN = /^<![A-Z]+[\t\n\v\f\r ][^>]*>$/;
 
+// Delimiters of math, Liquid tags, and footnote references, which Prettier’s
+// Markdown parser can recognize anywhere in a paragraph, including link and
+// image text. A backslash before each one makes Prettier read it as text
+const INLINE_SYNTAX_PATTERN = /\$|\{(?=[%{])|(?<=\[)\^/g;
+
+// The first bracket of a wiki link opener. A zero-width space after it keeps
+// Prettier from reading a wiki link without changing how brackets pair
+const WIKI_LINK_PATTERN = /\[(?=\[)/g;
+
 type RenderOptions = {
+	// Whether to compare raw HTML in blocks with math, Liquid tags, wiki links,
+	// or footnote references against their reference reading, which a reading
+	// of a single construct skips. When frontmatter or a footnote definition
+	// hides a link reference definition, any block with a bracket counts
+	checksInlineSyntax?: boolean;
 	filepath?: string | undefined;
 	parserName?: 'markdown' | 'remark';
 	// The original Markdown source, used to recover the reference renderer’s
@@ -60,10 +74,19 @@ type RenderState = {
 	// The paragraph, heading, or table cell whose inline content is being
 	// rendered
 	block: AST.Node | undefined;
+	// Where the reference reading of the current block finds raw HTML, as
+	// source ranges, when the block contains inline syntax only Prettier reads
+	blockHTML: ReadonlySet<string> | undefined;
 	context: AST.DocumentContext;
 	definitions: Set<string>;
+	// The source of each link reference definition in the document, and
+	// whether any of them is hidden from Prettier in frontmatter or a footnote
+	// definition
+	definitionSources: { hasHidden: boolean; sources: string[] };
 	// The block quotes and list items around the current node, outermost first
 	enclosingContainers: AST.Node[];
+	// Whether these nodes come from a footnote definition’s reading
+	isInFootnote: boolean;
 	// Whether these nodes come from reparsing a construct under the reference
 	// profile
 	isReading: boolean;
@@ -134,9 +157,16 @@ export default function renderDocumentContext(
 	};
 	const state: RenderState = {
 		block: undefined,
+		blockHTML: undefined,
 		context,
 		definitions: collectDefinitions(root),
+		definitionSources: collectDefinitionSources(
+			root,
+			options.checksInlineSyntax === false ? undefined : options.source,
+			options.parserName
+		),
 		enclosingContainers: [],
+		isInFootnote: false,
 		isReading: false,
 		isSingleLine: false,
 		length: 0,
@@ -485,10 +515,25 @@ function renderInline(
 	state: RenderState,
 	renderContent: () => void
 ): void {
-	const { block } = state;
+	const { block, blockHTML } = state;
+	const reading =
+		(!state.isReading || state.isInFootnote) &&
+		state.options.checksInlineSyntax !== false
+			? readInlineSyntax(node, state)
+			: undefined;
 	state.block = node;
+	state.blockHTML = reading && new Set(reading.referenceHTML);
 	renderContent();
 	state.block = block;
+	state.blockHTML = blockHTML;
+
+	// Disagreements within a construct have their own, earlier report
+	if (
+		reading &&
+		reading.referenceHTML.join(' ') !== reading.prettierHTML.join(' ')
+	) {
+		reportCrossingSyntax(node, reading.readings, state);
+	}
 }
 
 /**
@@ -785,7 +830,7 @@ function findParagraphLines(
  * several lines, or start an HTML block. Tags count with or without the
  * container prefixes on their later lines.
  */
-function hasRawHTML(lines: ReadonlyArray<string>): boolean {
+export function hasRawHTML(lines: ReadonlyArray<string>): boolean {
 	const contents = lines.map((line) =>
 		line.replace(CONTAINER_PREFIX_PATTERN, '')
 	);
@@ -955,10 +1000,16 @@ function renderReferenceReading(
 	const neutralized = reading.neutralize(sliced.text);
 	// An inline construct can end partway through a line that starts like a
 	// fence, where the rest of the line keeps it from opening one
-	const text =
+	const opened =
 		reading.isInline && getRestOfLine(source, node)
 			? escapeFenceOpening(neutralized)
 			: neutralized;
+	// Markup that the reference reading of the whole block doesn’t read as raw
+	// HTML, as inside a code span that crosses the construct, stays text
+	const text =
+		reading.isInline && state.blockHTML && !hasHTMLWithin(node, state)
+			? escapeUnescaped(opened, /</g)
+			: opened;
 	const root = pluginMarkdown.parsers[parserName].parse(text, {
 		originalText: text,
 	} as ParserOptions) as AST.RootNode;
@@ -1018,17 +1069,217 @@ function renderReferenceReading(
 			? onlyChild
 			: root;
 
-	const { isReading } = state;
+	const { isInFootnote, isReading } = state;
 	const start = state.length;
 	state.isReading = true;
+	state.isInFootnote = isInFootnote || node.type === 'footnoteDefinition';
 	renderChildren(content, state, isTight);
 	state.isReading = isReading;
+	state.isInFootnote = isInFootnote;
 	state.context.readings.push({
 		end: state.length,
 		hasRawHTML: htmlNodes.length > 0,
 		node,
 		start,
 	});
+}
+
+type InlineSyntaxReading = {
+	// Where Prettier’s Markdown parser finds raw HTML, as source ranges
+	prettierHTML: string[];
+	readings: AST.Node[];
+	// Where the reference reading finds raw HTML, as source ranges
+	referenceHTML: string[];
+};
+
+/**
+ * Reads a paragraph, heading, or table cell under the reference profile when
+ * it contains raw HTML syntax with math, Liquid tags, or wiki links. The
+ * reference profile reads these constructs as text, so a backtick or markup in
+ * one can pair with syntax outside it. The reading escapes their delimiters
+ * in the block’s source and appends the document’s link reference definitions,
+ * escaped the same way.
+ */
+function readInlineSyntax(
+	block: AST.Node,
+	state: RenderState
+): InlineSyntaxReading | undefined {
+	const { parserName = 'markdown', source } = state.options;
+	const start = block.position?.start.offset;
+	const end = block.position?.end.offset;
+
+	if (source === undefined || start === undefined || end === undefined) {
+		return undefined;
+	}
+
+	const blockSource = source.slice(start, end);
+	const sliced = sliceMarkdownSource(
+		source,
+		block,
+		state.enclosingContainers
+	);
+
+	if (
+		!sliced ||
+		!blockSource.includes('<') ||
+		!(
+			/\$|\{[%{]|\[[[^]/.test(blockSource) ||
+			(state.definitionSources.hasHidden && blockSource.includes('['))
+		)
+	) {
+		return undefined;
+	}
+
+	const text = neutralizeInlineSyntax(sliced.text);
+	const insertions = mapInsertions(sliced.text, text);
+	const definitions = state.definitionSources.sources.map((definition) =>
+		neutralizeInlineSyntax(definition)
+	);
+	const parsed = [text, definitions.join('\n')].filter(Boolean).join('\n\n');
+	const root = pluginMarkdown.parsers[parserName].parse(parsed, {
+		originalText: parsed,
+	} as ParserOptions) as AST.RootNode;
+	const toSource = (offset: number | undefined): number | undefined =>
+		sliced.offsets[insertions[offset ?? -1] ?? -1];
+
+	return {
+		prettierHTML: findRawHTML(block).map(
+			({ position }) =>
+				`${position?.start.offset}:${position?.end.offset}`
+		),
+		readings: findInlineReadings(block),
+		referenceHTML: findRawHTML(root)
+			.filter(
+				({ position }) => (position?.start.offset ?? 0) < text.length
+			)
+			.map(
+				({ position }) =>
+					`${toSource(position?.start.offset)}:${toSource(position?.end.offset)}`
+			),
+	};
+}
+
+/**
+ * Reports a disagreement on raw HTML in a block caused by inline syntax that
+ * only Prettier reads. The report names the first construct with an unpaired
+ * backtick or markup, which most likely supplies the syntax that pairs across
+ * it, or the block when no construct has either.
+ */
+function reportCrossingSyntax(
+	block: AST.Node,
+	readings: ReadonlyArray<AST.Node>,
+	state: RenderState
+): never {
+	const source = state.options.source ?? '';
+	const construct = readings.find(({ position }) => {
+		const text = source.slice(position?.start.offset, position?.end.offset);
+
+		return text.includes('<') || hasUnpairedBacktick(text);
+	});
+
+	return reportUnsupportedMarkdown({
+		filepath: state.options.filepath,
+		position: (construct ?? block).position?.start,
+		reason: construct
+			? `Prettier’s Markdown parser reads this as ${READINGS[construct.type!]!.description}, but GitHub Flavored Markdown can read a backtick or markup in it as part of syntax outside it, which changes what is raw HTML nearby`
+			: 'Prettier’s Markdown parser and GitHub Flavored Markdown disagree on what is raw HTML here, because GitHub Flavored Markdown reads math, Liquid tags, wiki links, footnotes, or frontmatter as Markdown text',
+	});
+}
+
+/**
+ * Checks whether the reference reading of the current block finds raw HTML
+ * within a construct.
+ */
+function hasHTMLWithin(node: AST.Node, state: RenderState): boolean {
+	const start = node.position?.start.offset ?? 0;
+	const end = node.position?.end.offset ?? 0;
+
+	return [...(state.blockHTML ?? [])].some((range) => {
+		const [htmlStart = 0, htmlEnd = 0] = range.split(':').map(Number);
+
+		return htmlStart < end && start < htmlEnd;
+	});
+}
+
+/**
+ * Checks whether a backtick run in the text has no run of the same length to
+ * pair with.
+ */
+function hasUnpairedBacktick(text: string): boolean {
+	const counts = new Map<number, number>();
+
+	for (const { 0: run, index } of text.matchAll(/`+/g)) {
+		// A backslash escapes the first backtick of a run
+		const length = run.length - (isEscaped(text, index) ? 1 : 0);
+
+		if (length > 0) {
+			counts.set(length, (counts.get(length) ?? 0) + 1);
+		}
+	}
+
+	return [...counts.values()].some((count) => count % 2 === 1);
+}
+
+/**
+ * Makes Prettier read math, Liquid tags, footnote references, and wiki links in
+ * the text as the reference profile does.
+ */
+function neutralizeInlineSyntax(text: string): string {
+	return insertUnescaped(
+		escapeUnescaped(text, INLINE_SYNTAX_PATTERN),
+		WIKI_LINK_PATTERN,
+		(match) => `${match}\u200B`
+	);
+}
+
+/**
+ * Escapes each match of a pattern that an odd number of backslashes doesn’t
+ * already escape.
+ */
+function escapeUnescaped(text: string, pattern: RegExp): string {
+	return insertUnescaped(text, pattern, (match) => `\\${match}`);
+}
+
+/**
+ * Replaces each match of a pattern that an odd number of backslashes doesn’t
+ * already escape.
+ */
+function insertUnescaped(
+	text: string,
+	pattern: RegExp,
+	replace: (match: string) => string
+): string {
+	return text.replaceAll(pattern, (match, offset: number) =>
+		isEscaped(text, offset) ? match : replace(match)
+	);
+}
+
+/**
+ * Checks whether an odd number of backslashes precedes an offset.
+ */
+function isEscaped(text: string, offset: number): boolean {
+	return /(?:^|[^\\])(?:\\\\)*\\$/.test(text.slice(0, offset));
+}
+
+/**
+ * Finds the raw HTML that Prettier’s Markdown parser reads in a node.
+ */
+function findRawHTML(node: AST.Node): AST.HTMLNode[] {
+	return findHTMLNodes(node)
+		.filter(({ html, parent }) => !isMarkdownText(html, parent))
+		.map(({ html }) => html);
+}
+
+/**
+ * Finds the inline constructs within a block that only Prettier recognizes, in
+ * source order.
+ */
+function findInlineReadings(node: AST.Node): AST.Node[] {
+	return (node.children ?? []).flatMap((child) =>
+		READINGS[child.type ?? '']?.isInline
+			? [child]
+			: findInlineReadings(child)
+	);
 }
 
 /**
@@ -1197,7 +1448,11 @@ export function renderReading(
 		originalText: text,
 	} as ParserOptions) as AST.RootNode;
 
-	return renderDocumentContext(root, { parserName, source: text });
+	return renderDocumentContext(root, {
+		checksInlineSyntax: false,
+		parserName,
+		source: text,
+	});
 }
 
 /**
@@ -1248,7 +1503,7 @@ function relocate(
 /**
  * Converts an offset in the source into a one-based line and column.
  */
-function toPoint(source: string, offset: number): AST.Point {
+export function toPoint(source: string, offset: number): AST.Point {
 	const before = source.slice(0, offset);
 	const lineStart = before.lastIndexOf('\n') + 1;
 
@@ -1312,6 +1567,102 @@ function writeText(node: AST.Node, state: RenderState): void {
 function write(state: RenderState, text: string): void {
 	state.output.push(text);
 	state.length += text.length;
+}
+
+/**
+ * Collects the source of each link reference definition, without container
+ * prefixes. The reference profile reads Markdown where Prettier reads
+ * frontmatter or a footnote definition. It reads frontmatter after a thematic
+ * break, and a footnote definition’s first paragraph as written in the
+ * source, including lines that Prettier reads as a separate paragraph, while
+ * its indented content is code. Definitions read there are hidden from
+ * Prettier, apart from those with footnote labels.
+ */
+function collectDefinitionSources(
+	root: AST.Node,
+	source: string | undefined,
+	parserName: 'markdown' | 'remark' = 'markdown'
+): { hasHidden: boolean; sources: string[] } {
+	const sources: string[] = [];
+	let hasHidden = false;
+
+	if (source === undefined) {
+		return { hasHidden, sources };
+	}
+
+	const pending: Array<{ containers: AST.Node[]; node: AST.Node }> = [
+		{ containers: [], node: root },
+	];
+
+	while (pending.length > 0) {
+		const { containers, node } = pending.pop()!;
+
+		if (node.type === 'definition') {
+			sources.push(
+				sliceMarkdownSource(source, node, containers)?.text ?? ''
+			);
+		}
+
+		if (node.type === 'footnoteDefinition' || node.type === 'frontMatter') {
+			// A leading line break keeps Prettier from reading frontmatter again,
+			// and escaped carets keep it from reading footnotes
+			const text = neutralizeInlineSyntax(
+				node.type === 'frontMatter'
+					? `\n${sliceMarkdownSource(source, node, containers)?.text ?? ''}`
+					: readParagraphLines(
+							source,
+							node.position?.start.offset ?? 0
+						).join('\n')
+			);
+			const read = collectDefinitionSources(
+				pluginMarkdown.parsers[parserName].parse(text, {
+					originalText: text,
+				} as ParserOptions) as AST.RootNode,
+				text,
+				parserName
+			).sources;
+
+			hasHidden ||= read.some(
+				(definition) => !/^ {0,3}\[\\\^/.test(definition)
+			);
+			sources.push(...read);
+			continue;
+		}
+
+		const innerContainers =
+			node.type === 'blockquote' || node.type === 'listItem'
+				? [...containers, node]
+				: containers;
+
+		for (const child of node.children ?? []) {
+			pending.push({ containers: innerContainers, node: child });
+		}
+	}
+
+	return { hasHidden, sources };
+}
+
+/**
+ * Reads the lines of the paragraph that the reference profile reads from an
+ * offset, up to a line that is blank apart from container prefixes. Later
+ * lines lose their container prefixes and indentation, including lazy lines
+ * without prefixes.
+ */
+function readParagraphLines(source: string, start: number): string[] {
+	const [first = '', ...rest] = source.slice(start).split('\n');
+	const lines = [first];
+
+	for (const line of rest) {
+		const content = line.replace(/^[\t >]*/, '');
+
+		if (content === '') {
+			break;
+		}
+
+		lines.push(content);
+	}
+
+	return lines;
 }
 
 /**

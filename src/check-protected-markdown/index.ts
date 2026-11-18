@@ -93,7 +93,11 @@ function renderMarkdown(
 		originalText: text,
 	} as ParserOptions) as AST.RootNode;
 
-	return renderDocumentContext(root, { parserName, source: text }).html;
+	return renderDocumentContext(root, {
+		checksInlineSyntax: false,
+		parserName,
+		source: text,
+	}).html;
 }
 
 /**
