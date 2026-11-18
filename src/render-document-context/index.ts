@@ -27,7 +27,10 @@ const CONTAINER_START_PATTERN =
 const FENCE_OPENING_PATTERN = /^ {0,3}(?:(`{3,})(?![^`]*`)|(~{3,}))/;
 
 // Constructs that Prettier reads as literal content, where the reference
-// renderer can open a code fence that stays open past their end
+// renderer can open a code fence that stays open past their end. Inline math
+// that spans lines can end partway through a line that starts like a fence,
+// before text that keeps the line from opening one, and wrapping can move that
+// text to the next line
 const FENCE_READING_TYPES: ReadonlySet<string> = new Set([
 	'frontMatter',
 	'inlineMath',
@@ -949,7 +952,13 @@ function renderReferenceReading(
 		return;
 	}
 
-	const text = reading.neutralize(sliced.text);
+	const neutralized = reading.neutralize(sliced.text);
+	// An inline construct can end partway through a line that starts like a
+	// fence, where the rest of the line keeps it from opening one
+	const text =
+		reading.isInline && getRestOfLine(source, node)
+			? escapeFenceOpening(neutralized)
+			: neutralized;
 	const root = pluginMarkdown.parsers[parserName].parse(text, {
 		originalText: text,
 	} as ParserOptions) as AST.RootNode;
@@ -985,7 +994,14 @@ function renderReferenceReading(
 		state.substitutes.set(html, originalHTMLNodes.splice(index, 1)[0]!);
 	}
 
-	if (leavesFenceOpenBeforeHTML(node, sliced.text, source, parserName)) {
+	if (
+		leavesFenceOpenBeforeHTML(
+			node,
+			`${sliced.text}${getRestOfLine(source, node)}`,
+			source,
+			parserName
+		)
+	) {
 		reportUnsupportedMarkdown({
 			filepath: state.options.filepath,
 			position: node.position?.start,
@@ -1017,16 +1033,17 @@ function renderReferenceReading(
 
 /**
  * Checks whether frontmatter or math leaves a fence open in the reference
- * reading of the given text, the construct’s source or its formatted text,
- * while raw HTML syntax appears later in the document. The check parses the
- * neutralized text followed by a probe line with the container prefixes of its
- * last line, where list item markers become spaces of the same width. That
- * line continues each block quote and list item open after the last line, so
- * it falls inside fenced code exactly when a fence stays open at the
- * construct’s end. A closing delimiter can’t close a fence, but a construct
- * that Prettier ends without one can end on a line that closes or opens a
- * fence. As a conservative bound, later syntax counts even past a closing fence
- * or where an escape, code span, or code block would make it literal.
+ * reading of the given text, while raw HTML syntax appears later in the
+ * document. The text is the construct’s source or formatted text, followed by
+ * whatever stays on its last line. The check parses the neutralized text
+ * followed by a probe line with the container prefixes of its last line, where
+ * list item markers become spaces of the same width. That line continues each
+ * block quote and list item open after the last line, so it falls inside fenced
+ * code exactly when a fence stays open at the construct’s end. A closing
+ * delimiter can’t close a fence, but a construct that Prettier ends without one
+ * can end on a line that closes or opens a fence. As a conservative bound,
+ * later syntax counts even past a closing fence or where an escape, code span,
+ * or code block would make it literal.
  */
 export function leavesFenceOpenBeforeHTML(
 	node: AST.Node,
@@ -1064,6 +1081,33 @@ export function leavesFenceOpenBeforeHTML(
 		reachesIntoFence(root, probe, offset) &&
 		hasRawHTML(source.slice(end).split('\n'))
 	);
+}
+
+/**
+ * Returns the text that follows a construct on its last line, which decides
+ * whether that line opens a fence.
+ */
+export function getRestOfLine(source: string, node: AST.Node): string {
+	const end = node.position?.end.offset ?? source.length;
+	const lineEnd = source.indexOf('\n', end);
+
+	return source.slice(end, lineEnd === -1 ? source.length : lineEnd);
+}
+
+/**
+ * Escapes a fence opening at the start of the last line of the given text.
+ */
+function escapeFenceOpening(text: string): string {
+	const lineStart = text.lastIndexOf('\n') + 1;
+	const opening = FENCE_OPENING_PATTERN.exec(text.slice(lineStart));
+
+	if (!opening) {
+		return text;
+	}
+
+	const index = text.indexOf(opening[1] ?? opening[2]!, lineStart);
+
+	return `${text.slice(0, index)}\\${text.slice(index)}`;
 }
 
 /**

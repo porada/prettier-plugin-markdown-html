@@ -2,6 +2,7 @@ import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import formatMarkdown from '../format-markdown/index.ts';
 import {
+	getRestOfLine,
 	leavesFenceOpenBeforeHTML,
 	renderReading,
 } from '../render-document-context/index.ts';
@@ -65,11 +66,25 @@ export default async function checkReferenceReadings(
 		const name = CONSTRUCT_NAMES[node.type] ?? 'Markdown';
 
 		// Formatting can leave a fence open, as when it changes the indentation
-		// of a YAML block scalar
+		// of a YAML block scalar. Prettier prints inline math as written, but
+		// wrapping can break its last line at the first space after it. As a
+		// conservative bound, its later lines in a container can lose all their
+		// indentation when Prettier reindents the container
+		const rest = getRestOfLine(options.originalText, node);
+		const keptRest =
+			options.proseWrap === 'always' ? rest.split(/[\t ]/, 1)[0] : rest;
+		const lines = context.enclosingContainers.get(node)?.length
+			? source.replaceAll(/\n[\t ]+/g, '\n')
+			: source;
+		const fenceText =
+			node.type === 'inlineMath'
+				? `${lines}${keptRest}`
+				: `${formatted.trimEnd()}${rest}`;
+
 		if (
 			leavesFenceOpenBeforeHTML(
 				node,
-				formatted,
+				fenceText,
 				options.originalText,
 				parserName
 			)
@@ -77,7 +92,7 @@ export default async function checkReferenceReadings(
 			reportUnsupportedMarkdown({
 				filepath: options.filepath,
 				position: node.position?.start,
-				reason: `Formatting this ${name} would leave a code fence in it open, so later raw HTML could render as code`,
+				reason: `Formatting this ${name} can leave a code fence in it open, so later raw HTML can render as code`,
 			});
 		}
 

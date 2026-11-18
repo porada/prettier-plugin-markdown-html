@@ -220,13 +220,52 @@ describe('Parser Disagreement', () => {
 		).rejects.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
 
-			Formatting this frontmatter would leave a code fence in it open, so later raw HTML could render as code]
+			Formatting this frontmatter can leave a code fence in it open, so later raw HTML can render as code]
 		`);
 	});
 
 	test('formats raw HTML after math that closes a fence in text that only Prettier reads as HTML', async () => {
 		const input = '$$\n<!foo\n```\n```\n>\n$$\n\n<div   >bar</div>\n';
 		const expectedOutput = '$$\n<!foo\n```\n```\n>\n$$\n\n<div>bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML after inline math whose line opens a fence when wrapped', async () => {
+		await expect(
+			format('foo $$bar\n```$$ `baz`\n<span   >qux</span>\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				printWidth: 10,
+				proseWrap: 'always',
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			Formatting this math can leave a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after inline math whose line opens a fence when its list item is reindented', async () => {
+		await expect(
+			format(
+				'- foo\n  - bar $$baz\n        ```$$\n    <span   >qux</span>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:9):
+
+			Formatting this math can leave a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('formats raw HTML after inline math whose line can’t open a fence', async () => {
+		const input = 'foo $$bar\n```$$ `baz`\n<span   >qux</span>\n';
+		const expectedOutput = 'foo $$bar\n```$$ `baz`\n<span>qux</span>\n';
 
 		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
 
@@ -386,7 +425,7 @@ describe('Parser Disagreement', () => {
 		).rejects.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
 
-			Formatting this frontmatter would leave a code fence in it open, so later raw HTML could render as code]
+			Formatting this frontmatter can leave a code fence in it open, so later raw HTML can render as code]
 		`);
 	});
 
@@ -399,7 +438,7 @@ describe('Parser Disagreement', () => {
 		).rejects.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
 
-			Formatting this frontmatter would leave a code fence in it open, so later raw HTML could render as code]
+			Formatting this frontmatter can leave a code fence in it open, so later raw HTML can render as code]
 		`);
 	});
 
