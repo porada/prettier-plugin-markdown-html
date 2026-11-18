@@ -13,6 +13,10 @@ import sliceMarkdownSource, {
 	isParagraphBreak,
 } from '../slice-markdown-source/index.ts';
 
+// Indentation and block quote and list item markers at the start of a line
+const CONTAINER_PREFIX_PATTERN =
+	/^(?:[\t >]|[*+-](?=[\t ])|\d{1,9}[).](?=[\t ]))*/;
+
 // Block quote and list item markers that can start a container, including
 // some that the reference renderer reads as text
 const CONTAINER_START_PATTERN =
@@ -21,6 +25,14 @@ const CONTAINER_START_PATTERN =
 // A possible fence opening after up to three spaces. A backtick fence’s info
 // string can’t contain a backtick
 const FENCE_OPENING_PATTERN = /^ {0,3}(?:(`{3,})(?![^`]*`)|(~{3,}))/;
+
+// Constructs that Prettier reads as literal content, where the reference
+// renderer can open a code fence that stays open past their end
+const FENCE_READING_TYPES: ReadonlySet<string> = new Set([
+	'frontMatter',
+	'inlineMath',
+	'math',
+]);
 
 // This pattern matches inline declarations recognized by the reference
 // renderer: `<!`, an uppercase name, ASCII whitespace, and the rest up to `>`
@@ -70,7 +82,9 @@ export const READINGS: Readonly<Record<string, Reading>> = {
 	frontMatter: {
 		description: 'frontmatter',
 		isInline: false,
-		neutralize: (source) => `\n${source}`,
+		// Escaped dollar signs keep Prettier from reading math inside the
+		// reading, which could hide a fence
+		neutralize: (source) => `\n${source.replaceAll('$', String.raw`\$`)}`,
 	},
 	inlineMath: {
 		description: 'math',
@@ -765,12 +779,18 @@ function findParagraphLines(
 
 /**
  * Checks whether source lines can contain raw HTML, including tags that span
- * several lines, or start an HTML block.
+ * several lines, or start an HTML block. Tags count with or without the
+ * container prefixes on their later lines.
  */
 function hasRawHTML(lines: ReadonlyArray<string>): boolean {
+	const contents = lines.map((line) =>
+		line.replace(CONTAINER_PREFIX_PATTERN, '')
+	);
+
 	return (
 		containsRawHTML(lines.join('\n')) ||
-		lines.some((line) => startsHTMLBlock(line.replace(/^[\t >]*/, '')))
+		containsRawHTML(contents.join('\n')) ||
+		contents.some((line) => startsHTMLBlock(line))
 	);
 }
 
@@ -965,6 +985,14 @@ function renderReferenceReading(
 		state.substitutes.set(html, originalHTMLNodes.splice(index, 1)[0]!);
 	}
 
+	if (leavesFenceOpenBeforeHTML(node, sliced.text, source, parserName)) {
+		reportUnsupportedMarkdown({
+			filepath: state.options.filepath,
+			position: node.position?.start,
+			reason: `Prettier’s Markdown parser reads this as ${reading.description}, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code`,
+		});
+	}
+
 	// An inline construct reads as the content of a paragraph
 	const [onlyChild] = root.children;
 	const content =
@@ -985,6 +1013,106 @@ function renderReferenceReading(
 		node,
 		start,
 	});
+}
+
+/**
+ * Checks whether frontmatter or math leaves a fence open in the reference
+ * reading of the given text, the construct’s source or its formatted text,
+ * while raw HTML syntax appears later in the document. The check parses the
+ * neutralized text followed by a probe line with the container prefixes of its
+ * last line, where list item markers become spaces of the same width. That
+ * line continues each block quote and list item open after the last line, so
+ * it falls inside fenced code exactly when a fence stays open at the
+ * construct’s end. A closing delimiter can’t close a fence, but a construct
+ * that Prettier ends without one can end on a line that closes or opens a
+ * fence. As a conservative bound, later syntax counts even past a closing fence
+ * or where an escape, code span, or code block would make it literal.
+ */
+export function leavesFenceOpenBeforeHTML(
+	node: AST.Node,
+	text: string,
+	source: string,
+	parserName: 'markdown' | 'remark'
+): boolean {
+	const end = node.position?.end.offset;
+
+	if (!FENCE_READING_TYPES.has(node.type ?? '') || end === undefined) {
+		return false;
+	}
+
+	const reading = READINGS[node.type!]!.neutralize(text.trimEnd());
+	const lastLine = reading.slice(reading.lastIndexOf('\n') + 1);
+	const [prefix] = CONTAINER_PREFIX_PATTERN.exec(lastLine)!;
+	let probe = `${reading}\n${prefix.replaceAll(/[^\t >]/g, ' ')}x`;
+	let offset = reading.length + 1;
+	let root = parseProbe(probe, parserName);
+
+	// Prettier reads some Markdown text as an HTML block that can hide a fence
+	// from its parse. An escaped opening bracket makes that text Markdown
+	for (
+		let markdownText = findMarkdownText(root);
+		markdownText;
+		markdownText = findMarkdownText(root)
+	) {
+		const index = probe.indexOf('<', markdownText.position!.start.offset);
+		probe = `${probe.slice(0, index)}\\${probe.slice(index)}`;
+		offset += 1;
+		root = parseProbe(probe, parserName);
+	}
+
+	return (
+		reachesIntoFence(root, probe, offset) &&
+		hasRawHTML(source.slice(end).split('\n'))
+	);
+}
+
+/**
+ * Parses a fence probe with Prettier’s Markdown parser.
+ */
+function parseProbe(
+	probe: string,
+	parserName: 'markdown' | 'remark'
+): AST.RootNode {
+	return pluginMarkdown.parsers[parserName].parse(probe, {
+		originalText: probe,
+	} as ParserOptions) as AST.RootNode;
+}
+
+/**
+ * Finds the first HTML block from Prettier’s Markdown parser that the
+ * reference renderer reads as Markdown text.
+ */
+function findMarkdownText(root: AST.Node): AST.HTMLNode | undefined {
+	return findHTMLNodes(root).find(
+		({ html, parent }) =>
+			isBlockContainer(parent) && isMarkdownText(html, parent)
+	)?.html;
+}
+
+/**
+ * Checks whether fenced code that starts before an offset in parsed text
+ * extends past it. Indented code starts with its indentation instead of a
+ * fence.
+ */
+function reachesIntoFence(
+	node: AST.Node,
+	text: string,
+	offset: number
+): boolean {
+	const start = node.position?.start.offset;
+	const end = node.position?.end.offset;
+
+	return (
+		(node.type === 'code' &&
+			start !== undefined &&
+			end !== undefined &&
+			start < offset &&
+			end > offset &&
+			FENCE_OPENING_PATTERN.test(text.slice(start).split('\n', 1)[0]!)) ||
+		(node.children ?? []).some((child) =>
+			reachesIntoFence(child, text, offset)
+		)
+	);
 }
 
 /**

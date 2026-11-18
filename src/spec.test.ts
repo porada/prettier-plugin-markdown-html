@@ -98,6 +98,360 @@ describe('Parser Disagreement', () => {
 		);
 	});
 
+	test('formats raw HTML in a document whose frontmatter Prettier changes', async () => {
+		const input = "---\ntitle: 'foo'\n---\n\n<div   >bar</div>\n";
+		const expectedOutput = '---\ntitle: "foo"\n---\n\n<div>bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML after frontmatter that leaves a backtick fence open', async () => {
+		await expect(
+			format(
+				'---\nfoo: |\n  ```\n---\n\n<div   >bar</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as frontmatter, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after math that leaves a tilde fence open', async () => {
+		await expect(
+			format('$$\n~~~\n$$\n\n<div   >foo</div>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after math that leaves a fence open in a block quote', async () => {
+		await expect(
+			format(
+				'> $$\n> ```\n> $$\n>\n> <div   >foo</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after math whose fence stays open in a list item', async () => {
+		await expect(
+			format(
+				'$$\n- ```\n  $$\n  <div   >foo</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after math whose fence reopens after a list item', async () => {
+		await expect(
+			format(
+				'$$\n- ```\n  ```\n```\n$$\n\n<div   >foo</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after math that leaves a fence with a code span open', async () => {
+		await expect(
+			format(
+				'$$\n```\n`foo`\n$$\n\n<div   >bar</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after math that leaves a fence open in text that only Prettier reads as HTML', async () => {
+		await expect(
+			format(
+				'$$\n<!foo\n```\n>\n$$\n\n<div   >bar</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after frontmatter that leaves a fence open in text that only Prettier reads as HTML', async () => {
+		await expect(
+			format(
+				'---\nfoo: |\n  <!bar\n  ```\n  >\n---\n\n<div   >baz</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as frontmatter, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after frontmatter whose formatting leaves a fence open in text that only Prettier reads as HTML', async () => {
+		await expect(
+			format(
+				'---\nfoo: |\n    <!bar\n    ```\n    >\n---\n\n<div   >baz</div>\n',
+				{ ...SPEC_EXAMPLE_OPTIONS, tabWidth: 2 }
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Formatting this frontmatter would leave a code fence in it open, so later raw HTML could render as code]
+		`);
+	});
+
+	test('formats raw HTML after math that closes a fence in text that only Prettier reads as HTML', async () => {
+		const input = '$$\n<!foo\n```\n```\n>\n$$\n\n<div   >bar</div>\n';
+		const expectedOutput = '$$\n<!foo\n```\n```\n>\n$$\n\n<div>bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML after math that leaves a fence open even past a later closing fence', async () => {
+		await expect(
+			format(
+				'$$\n```\n$$\n```\n\n<div   >foo</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects literal HTML syntax after math that leaves a fence open', async () => {
+		await expect(
+			format('$$\n```\n$$\n\nfoo `<b>` bar\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects an unfinished HTML block start in a later list item after math that leaves a fence open', async () => {
+		await expect(format('$$\n```\n$$\n\n- <div\n', SPEC_EXAMPLE_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects an unfinished HTML block start in a later list item in a block quote after math that leaves a fence open', async () => {
+		await expect(format('$$\n```\n$$\n\n> 1. <div\n', SPEC_EXAMPLE_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects a later tag across block quote lines after math that leaves a fence open', async () => {
+		await expect(
+			format(
+				'$$\n```\n$$\n\n> foo <img alt=\n> "bar"> baz\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('rejects raw HTML after unclosed math that leaves a fence open in a list item', async () => {
+		await expect(
+			format('- $$\n  ```\n\n<div   >foo</div>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('formats raw HTML after unclosed math whose fence closes at the end of a list item', async () => {
+		const input = '- $$\n  ```\n  ```\n\n<div   >foo</div>\n';
+		const expectedOutput = '- $$\n  ```\n  ```\n  $$\n\n<div>foo</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML after unclosed math that leaves a fence open in a block quote in a list item', async () => {
+		await expect(
+			format('- $$\n  > ```\n\n<div   >foo</div>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			Prettier’s Markdown parser reads this as math, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('formats raw HTML after unclosed math whose fence closes in a block quote in a list item', async () => {
+		const input = '- $$\n  > ```\n  > ```\n\n<div   >foo</div>\n';
+		const expectedOutput =
+			'- $$\n  > ```\n  > ```\n  $$\n\n<div>foo</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after unclosed math whose fence closes at the end of a block quote', async () => {
+		const input = '> $$\n> ```\n> ```\n\n<div   >foo</div>\n';
+		const expectedOutput = '> $$\n> ```\n> ```\n> $$\n\n<div>foo</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML after frontmatter that leaves a fence open after math syntax', async () => {
+		await expect(
+			format(
+				'---\nfoo: |\n  $$\n  ```\n---\n\n<div   >bar</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Prettier’s Markdown parser reads this as frontmatter, but GitHub Flavored Markdown leaves a code fence in it open, so later raw HTML can render as code]
+		`);
+	});
+
+	test('formats raw HTML after frontmatter that closes a fence after math syntax', async () => {
+		const input =
+			'---\nfoo: |\n  $$\n  ```\n  $$\n  ```\n---\n\n<div   >bar</div>\n';
+		const expectedOutput =
+			'---\nfoo: |\n    $$\n    ```\n    $$\n    ```\n---\n\n<div>bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML after frontmatter whose formatting leaves a fence open after math syntax', async () => {
+		await expect(
+			format(
+				'---\nfoo: |\n    $$\n    ```\n    $$\n---\n\n<div   >bar</div>\n',
+				{
+					...SPEC_EXAMPLE_OPTIONS,
+					tabWidth: 2,
+				}
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Formatting this frontmatter would leave a code fence in it open, so later raw HTML could render as code]
+		`);
+	});
+
+	test('rejects raw HTML after frontmatter whose formatting leaves a fence open', async () => {
+		await expect(
+			format('---\nfoo: |\n    ```\n---\n\n<div   >bar</div>\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				tabWidth: 2,
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			Formatting this frontmatter would leave a code fence in it open, so later raw HTML could render as code]
+		`);
+	});
+
+	test('formats raw HTML after frontmatter with four-space fence indentation', async () => {
+		const input = '---\nfoo: |\n    ```\n---\n\n<div   >bar</div>\n';
+		const expectedOutput = '---\nfoo: |\n    ```\n---\n\n<div>bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after math that closes its fence', async () => {
+		const input = '$$\n```\n```\n$$\n\n<div   >foo</div>\n';
+		const expectedOutput = '$$\n```\n```\n$$\n\n<div>foo</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('follows Prettier’s formatting of frontmatter that leaves a fence open without later raw HTML', async () => {
+		const input = '---\nfoo: |\n  ```\n---\n\nbar\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(
+			await format(input, { ...SPEC_EXAMPLE_OPTIONS, plugins: [] })
+		);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after frontmatter whose fence closes with its list item', async () => {
+		const input = '---\n- |\n  ```js\n---\n\n<div   >bar</div>\n';
+		const expectedOutput = '---\n- |\n    ```js\n---\n\n<div>bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
 	test('keeps inline syntax specific to Prettier in its paragraph', async () => {
 		const input = 'foo [[bar]] {% baz %}\n\n<div   ></div>\n';
 		const expectedOutput = 'foo [[bar]] {% baz %}\n\n<div></div>\n';

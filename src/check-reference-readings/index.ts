@@ -1,8 +1,14 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import formatMarkdown from '../format-markdown/index.ts';
-import { renderReading } from '../render-document-context/index.ts';
-import { reportUnsafeLayout } from '../report-error/index.ts';
+import {
+	leavesFenceOpenBeforeHTML,
+	renderReading,
+} from '../render-document-context/index.ts';
+import {
+	reportUnsafeLayout,
+	reportUnsupportedMarkdown,
+} from '../report-error/index.ts';
 import sliceMarkdownSource from '../slice-markdown-source/index.ts';
 
 // Names of the constructs that only Prettier’s Markdown parser recognizes
@@ -56,6 +62,25 @@ export default async function checkReferenceReadings(
 			printWidth: options.printWidth - node.position!.start.column + 1,
 		});
 
+		const name = CONSTRUCT_NAMES[node.type] ?? 'Markdown';
+
+		// Formatting can leave a fence open, as when it changes the indentation
+		// of a YAML block scalar
+		if (
+			leavesFenceOpenBeforeHTML(
+				node,
+				formatted,
+				options.originalText,
+				parserName
+			)
+		) {
+			reportUnsupportedMarkdown({
+				filepath: options.filepath,
+				position: node.position?.start,
+				reason: `Formatting this ${name} would leave a code fence in it open, so later raw HTML could render as code`,
+			});
+		}
+
 		const before = renderReading(node.type, source, parserName);
 		const after = renderReading(node.type, formatted.trimEnd(), parserName);
 
@@ -66,7 +91,6 @@ export default async function checkReferenceReadings(
 		}
 
 		const describe = container ? describeRendering : describeHTML;
-		const name = CONSTRUCT_NAMES[node.type] ?? 'Markdown';
 
 		if (describe(before) !== describe(after)) {
 			reportUnsafeLayout({

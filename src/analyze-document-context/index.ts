@@ -162,8 +162,12 @@ function collectReadingContainers(
 	const containers = new Map<AST.Node, string>();
 
 	for (const { node, start } of context.readings) {
+		// An element that starts where the reading starts can’t contain it. It
+		// belongs to the reading or follows a reading that renders nothing
 		const element = findAncestors(root, start).findLast(
-			({ sourceSpan }) => !generatedStarts.has(sourceSpan.start.offset)
+			({ sourceSpan }) =>
+				sourceSpan.start.offset < start &&
+				!generatedStarts.has(sourceSpan.start.offset)
 		);
 
 		if (element) {
