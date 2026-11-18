@@ -2637,6 +2637,214 @@ describe('Content and Whitespace', () => {
 	});
 });
 
+describe('Formatting Decisions', () => {
+	test('rejects raw HTML after a paragraph line that formatting turns into a fence opening', async () => {
+		await expect(
+			format('foo\n\t```\n\n<div   >bar</div>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (2:2):
+
+			Prettier’s Markdown formatting would remove the indentation of this line, so it would open a code fence, and later raw HTML could render as code]
+		`);
+	});
+
+	test('rejects raw HTML that wrapping moves into a fence', async () => {
+		await expect(
+			format('foo\n```bar `baz`\n<span   >qux</span>\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				printWidth: 8,
+				proseWrap: 'always',
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (2:1):
+
+			With \`proseWrap\` set to \`always\`, Prettier’s Markdown formatting can wrap this line here, where it would open a code fence, and later raw HTML could render as code]
+		`);
+	});
+
+	test('rejects literal markup that formatting exposes as raw HTML', async () => {
+		await expect(
+			format(
+				'~~~foo `bar`\n<div   >baz</div>\n~~~\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Prettier’s Markdown formatting would rewrite this tilde fence with backticks, which GitHub Flavored Markdown doesn’t read as a fence when its info string contains a backtick, so markup in it could become raw HTML]
+		`);
+	});
+
+	test('rejects raw HTML on a paragraph line that formatting turns into a fence opening', async () => {
+		await expect(
+			format('foo\n    ```<span   >bar</span>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (2:5):
+
+			Prettier’s Markdown formatting would remove the indentation of this line, so it would open a code fence, and later raw HTML could render as code]
+		`);
+	});
+
+	test('rejects raw HTML in a fence whose info string has a character reference for a backtick', async () => {
+		await expect(
+			format(
+				'```foo &#96;bar&#96;\n<div   >baz</div>\n```\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Prettier’s Markdown formatting would decode a character reference in this fence’s info string into a backtick, which GitHub Flavored Markdown doesn’t allow there, so markup in the fence could become raw HTML]
+		`);
+	});
+
+	test('formats raw HTML after an ignored paragraph line that looks like an indented fence', async () => {
+		const input =
+			'<!-- prettier-ignore -->\nfoo\n    ```\n\n<div   >bar</div>\n';
+		const expectedOutput =
+			'<!-- prettier-ignore -->\nfoo\n    ```\n\n<div>bar</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('formats raw HTML after indented code that looks like a tilde fence', async () => {
+		const input = '    ~~~foo `bar`\n\n<div   >baz</div>\n';
+		const expectedOutput = '    ~~~foo `bar`\n\n<div>baz</div>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML after a setext heading line that formatting turns into a fence opening', async () => {
+		await expect(
+			format(
+				'foo\n\t```\n---\n\n<div   >bar</div>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (2:2):
+
+			Prettier’s Markdown formatting would remove the indentation of this line, so it would open a code fence, and later raw HTML could render as code]
+		`);
+	});
+
+	test('rejects markup that decoding a fence info string exposes as raw HTML', async () => {
+		await expect(
+			format(
+				'```foo &#96;bar&#96; &lt;i&gt;baz&lt;/i&gt;\n```\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Prettier’s Markdown formatting would decode a character reference in this fence’s info string into a backtick, which GitHub Flavored Markdown doesn’t allow there, so markup in the fence could become raw HTML]
+		`);
+	});
+
+	test('formats raw HTML in a fence whose info string has a reference Prettier keeps', async () => {
+		const input =
+			'```foo &GRAVE;\n<div   >bar</div>\n```\n\n<span   >baz</span>\n';
+		const expectedOutput =
+			'```foo &GRAVE;\n<div   >bar</div>\n```\n\n<span>baz</span>\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML after a setext heading that wrapping can turn into a fence opening', async () => {
+		await expect(
+			format('foo ~~~bar baz qux\n---\n\n<div   >quux</div>\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				printWidth: 8,
+				proseWrap: 'always',
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier’s Markdown formatting can wrap this line here, where it would open a code fence, and later raw HTML could render as code]
+		`);
+	});
+
+	test('rejects markup that decoding character references in a fence info string can form', async () => {
+		await expect(
+			format(
+				'```foo &#96;bar&#96; &lt;&#105;&gt;baz&lt;/&#105;&gt;\n```\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Prettier’s Markdown formatting would decode a character reference in this fence’s info string into a backtick, which GitHub Flavored Markdown doesn’t allow there, so markup in the fence could become raw HTML]
+		`);
+	});
+
+	test('rejects raw HTML in a fence whose info string encodes a backtick reference twice', async () => {
+		await expect(
+			format(
+				'```foo &amp;grave;\n<div   >bar</div>\n```\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Prettier’s Markdown formatting would decode a character reference in this fence’s info string into a backtick, which GitHub Flavored Markdown doesn’t allow there, so markup in the fence could become raw HTML]
+		`);
+	});
+
+	test('rejects raw HTML in a fence whose info string encodes a backtick reference several times', async () => {
+		await expect(
+			format(
+				'~~~foo &amp;amp;grave;\n<div   >bar</div>\n~~~\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Prettier’s Markdown formatting would decode a character reference in this fence’s info string into a backtick, which GitHub Flavored Markdown doesn’t allow there, so markup in the fence could become raw HTML]
+		`);
+	});
+
+	test('rejects raw HTML in a fence whose info string decodes into a backtick reference', async () => {
+		await expect(
+			format(
+				'```foo &gr&#97;ve;\n<div   >bar</div>\n```\n\n<em   >baz</em>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+
+			Prettier’s Markdown formatting would decode a character reference in this fence’s info string into a backtick, which GitHub Flavored Markdown doesn’t allow there, so markup in the fence could become raw HTML]
+		`);
+	});
+
+	test('formats raw HTML after a code span whose lines look like an indented fence', async () => {
+		const options = {
+			...SPEC_EXAMPLE_OPTIONS,
+			proseWrap: 'never',
+		} as const;
+		const input = 'foo ``  \n    ```\n`` bar\n\n<div   >baz</div>\n';
+		const expectedOutput = 'foo `       ``` ` bar\n\n<div>baz</div>\n';
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+});
+
 describe('Indentation Across Fragments', () => {
 	test('indents later lines for raw ancestors outside their container', async () => {
 		const input = `<div>

@@ -1,6 +1,7 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import analyzeDocumentContext from '../analyze-document-context/index.ts';
+import checkFenceFormatting from '../check-fence-formatting/index.ts';
 import checkProtectedMarkdown from '../check-protected-markdown/index.ts';
 import checkReferenceReadings from '../check-reference-readings/index.ts';
 import formatBlockHTML, {
@@ -104,6 +105,9 @@ async function processMarkdown(
 				isIgnored,
 				options
 			);
+
+			// Formatting can expose markup in a fence as raw HTML
+			checkFenceFormatting(root, options, isIgnored);
 		}
 
 		return root;
@@ -127,6 +131,7 @@ async function processMarkdown(
 			options
 		);
 		await checkSplitElements(analysis.splitElements, ignoredNodes, options);
+		checkFenceFormatting(root, options, isIgnored);
 	}
 
 	const state: ScopeState = {
