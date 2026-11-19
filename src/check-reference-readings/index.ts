@@ -2,6 +2,7 @@ import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import formatMarkdown from '../format-markdown/index.ts';
 import {
+	getDelimiterRowChecks,
 	getRestOfLine,
 	leavesFenceOpenBeforeHTML,
 	renderReading,
@@ -29,6 +30,17 @@ const CONSTRUCT_NAMES: Readonly<Record<string, string>> = {
  * collapsed outside `<pre>` elements. Otherwise, the comparison covers only raw
  * HTML and the tags generated around it, and runs only when raw HTML is present
  * before or after formatting.
+ *
+ * First, it reports an error for a paragraph, heading, or table with raw HTML
+ * syntax that an ignore directive doesn’t protect, if a later content line has
+ * the syntax of a table delimiter row. With `proseWrap` set to `always`, the
+ * same applies to a paragraph or setext heading that starts with a possible
+ * link reference definition, which a line break could complete, and to a word
+ * that wrapping could move to the start of a line, where it could open another
+ * Markdown block. A word that would open an HTML block there is enough on its
+ * own. Prettier keeps each line’s words with `preserve`. With `never`, it joins
+ * soft line breaks and keeps hard ones, so a word can start a line only where
+ * it already does in the source.
  */
 export default async function checkReferenceReadings(
 	context: AST.DocumentContext,
@@ -37,6 +49,41 @@ export default async function checkReferenceReadings(
 	isIgnored: (node: AST.Node) => boolean,
 	options: ParserOptions
 ): Promise<void> {
+	for (const { block, findWrapHazards, line } of getDelimiterRowChecks(
+		context
+	)) {
+		if (isIgnored(block)) {
+			continue;
+		}
+
+		if (line) {
+			reportUnsupportedMarkdown({
+				filepath: options.filepath,
+				position: line,
+				reason: 'Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup',
+			});
+		}
+
+		const hazards =
+			options.proseWrap === 'always' ? findWrapHazards() : undefined;
+
+		if (hazards?.definition) {
+			reportUnsupportedMarkdown({
+				filepath: options.filepath,
+				position: hazards.definition,
+				reason: 'With `proseWrap` set to `always`, a line break that Prettier adds can complete a link reference definition that starts here, which would change the context of nearby HTML or HTML-like markup',
+			});
+		}
+
+		if (hazards?.word) {
+			reportUnsupportedMarkdown({
+				filepath: options.filepath,
+				position: hazards.word,
+				reason: 'With `proseWrap` set to `always`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup',
+			});
+		}
+	}
+
 	const parserName = options.parser === 'remark' ? 'remark' : 'markdown';
 
 	for (const { end, hasRawHTML, node, start } of context.readings) {
@@ -71,7 +118,7 @@ export default async function checkReferenceReadings(
 							1,
 					});
 
-		const name = CONSTRUCT_NAMES[node.type] ?? 'Markdown';
+		const name = CONSTRUCT_NAMES[node.type]!;
 
 		// Formatting can leave a fence open, as when it changes the indentation
 		// of a YAML block scalar. Prettier prints inline math as written, but

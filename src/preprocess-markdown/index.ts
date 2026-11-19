@@ -261,8 +261,7 @@ async function formatScopes(
 			await formatScopes(
 				child,
 				{
-					ancestors:
-						analysis.rawAncestorsByContainer.get(child) ?? [],
+					ancestors: analysis.rawAncestorsByContainer.get(child)!,
 					endsOpenBlocks: layout.endsOpenBlocks,
 					isListItem: false,
 					isPrintedTight: false,
@@ -373,7 +372,7 @@ function getInlineLayout(
 	return edges
 		? {
 				...edges,
-				containers: context.enclosingContainers.get(paragraph) ?? [],
+				containers: context.enclosingContainers.get(paragraph)!,
 				paragraph,
 			}
 		: undefined;
@@ -419,8 +418,7 @@ async function formatListScopes(
 		await formatScopes(
 			item,
 			{
-				ancestors:
-					state.analysis.rawAncestorsByContainer.get(item) ?? [],
+				ancestors: state.analysis.rawAncestorsByContainer.get(item)!,
 				endsOpenBlocks: false,
 				isListItem: true,
 				// When `separations` is undefined, the list is ignored or
@@ -457,8 +455,11 @@ async function formatListScopes(
  * heading into the preceding link reference definition’s title by removing the
  * blank line between them.
  */
-function checkDefinitionTitles(item: AST.Node, options: ParserOptions): void {
-	const children = item.children ?? [];
+function checkDefinitionTitles(
+	item: AST.ParentNode,
+	options: ParserOptions
+): void {
+	const { children } = item;
 
 	for (const [index, child] of children.entries()) {
 		const next = children[index + 1];
@@ -502,7 +503,10 @@ function endBeforeNextItem(
 
 	const end = source.lastIndexOf('\n', nextStart.offset - 1);
 
-	if (end < (position.end.offset ?? 0)) {
+	/* v8 ignore next -- @preserve */
+	const itemEnd = position.end.offset ?? 0;
+
+	if (end < itemEnd) {
 		return;
 	}
 
@@ -575,7 +579,7 @@ function isNumberedAsOne(
 	const [first, second, third] = list.children.map((item) =>
 		Number(
 			/^\d+/.exec(
-				options.originalText.slice(item.position?.start.offset ?? 0)
+				options.originalText.slice(item.position?.start.offset)
 			)?.[0]
 		)
 	);
@@ -591,7 +595,7 @@ function isNumberedAsOne(
  * Collects nodes that Markdown ignore comments protect from formatting, and the
  * comments that Prettier honors.
  */
-function collectIgnoredNodes(root: AST.Node): {
+function collectIgnoredNodes(root: AST.RootNode): {
 	activeIgnoreComments: Set<AST.Node>;
 	ignoredNodes: Set<AST.Node>;
 } {
@@ -618,17 +622,17 @@ function collectIgnoredNodes(root: AST.Node): {
 	// they’re closed
 	let rangeStart: number | undefined;
 
-	for (const [index, child] of (root.children ?? []).entries()) {
+	for (const [index, child] of root.children.entries()) {
 		const kind = getIgnoreCommentKind(child);
 
 		if (rangeStart === undefined && kind === 'start') {
 			rangeStart = index;
 		} else if (rangeStart !== undefined && kind === 'end') {
-			for (const ignored of root.children!.slice(rangeStart + 1, index)) {
+			for (const ignored of root.children.slice(rangeStart + 1, index)) {
 				markIgnored(ignored, ignoredNodes);
 			}
 
-			activeIgnoreComments.add(root.children![rangeStart]!);
+			activeIgnoreComments.add(root.children[rangeStart]!);
 			activeIgnoreComments.add(child);
 			rangeStart = undefined;
 		}
@@ -647,7 +651,7 @@ function getIgnoreCommentKind(
 ): 'end' | 'next' | 'start' | undefined {
 	const match =
 		node.type === 'html'
-			? IGNORE_COMMENT_PATTERN.exec(node.value ?? '')
+			? IGNORE_COMMENT_PATTERN.exec((node as AST.HTMLNode).value)
 			: null;
 
 	if (!match) {

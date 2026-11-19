@@ -172,7 +172,7 @@ async function readProtectedContent(html: string): Promise<string | undefined> {
 	}
 
 	const contents: string[] = [];
-	const pending = [...(root.children ?? [])];
+	const pending = [root];
 
 	while (pending.length > 0) {
 		const node = pending.shift()!;
@@ -189,11 +189,11 @@ async function readProtectedContent(html: string): Promise<string | undefined> {
 			node.kind === 'element' &&
 			(isRawTextTag(name) || PRESERVED_WHITESPACE_TAG_NAMES.has(name))
 		) {
+			// The content of an unclosed element runs to the end
 			contents.push(
 				html.slice(
-					node.startSourceSpan?.end.offset ??
-						node.sourceSpan.end.offset,
-					node.endSourceSpan?.start.offset ?? html.length
+					node.startSourceSpan!.end.offset,
+					node.endSourceSpan?.start.offset
 				)
 			);
 			continue;

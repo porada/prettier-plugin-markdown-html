@@ -94,11 +94,7 @@ export function stripContainerPrefixes(
 	}
 
 	const firstLineStart = source.lastIndexOf('\n', start - 1) + 1;
-	const firstLineEnd = source.indexOf('\n', start);
-	const firstLine = source.slice(
-		firstLineStart,
-		firstLineEnd === -1 ? undefined : firstLineEnd
-	);
+	const firstLine = source.slice(firstLineStart, findLineEnd(source, start));
 	const indentation = isRelativeToNode
 		? measureColumns(firstLine.slice(0, start - firstLineStart)) -
 			readPrefixes(source, firstLineStart, firstLine, containers).column
@@ -138,13 +134,52 @@ export function isParagraphBreak(
 	lineStart: number,
 	containers: ReadonlyArray<AST.Node>
 ): boolean {
-	const lineEnd = source.indexOf('\n', lineStart);
-	const line = source.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+	const line = source.slice(lineStart, findLineEnd(source, lineStart));
+	const { cursor } = readCompletePrefixes(source, line, containers);
+
+	while (readQuoteMarker(line, cursor)) {
+		// Each marker of an empty block quote can follow up to three columns of
+		// indentation
+	}
+
+	return /^[\t ]*$/.test(line.slice(cursor.index));
+}
+
+/**
+ * Measures the indentation of a source line after the block quote markers and
+ * list item indentation that it has in full, read from outermost to
+ * innermost, with tabs advancing to the next tab stop. A lazy continuation
+ * line lacks a block quote marker or sufficient list item indentation, and its
+ * indentation counts from the end of the outer containers’ prefixes. A blank
+ * line has only spaces or tabs after those prefixes.
+ */
+export function measureLineIndentation(
+	source: string,
+	lineStart: number,
+	containers: ReadonlyArray<AST.Node>
+): { indentation: number; isBlank: boolean; isLazy: boolean } {
+	const line = source.slice(lineStart, findLineEnd(source, lineStart));
+	const { cursor, isLazy } = readCompletePrefixes(source, line, containers);
+	const indentation = readIndentation(line, cursor).length;
+
+	return { indentation, isBlank: cursor.index === line.length, isLazy };
+}
+
+/**
+ * Reads the block quote markers and list item indentation that a line has in
+ * full, from outermost to innermost. Reading stops before the first prefix
+ * that the line lacks or has only in part.
+ */
+function readCompletePrefixes(
+	source: string,
+	line: string,
+	containers: ReadonlyArray<AST.Node>
+): { cursor: LineCursor; isLazy: boolean } {
 	const cursor: LineCursor = { column: 0, index: 0, pending: 0 };
 
 	for (const [index, container] of containers.entries()) {
 		if (container.type === 'blockquote' && !readQuoteMarker(line, cursor)) {
-			break;
+			return { cursor, isLazy: true };
 		}
 
 		if (container.type === 'listItem') {
@@ -158,18 +193,12 @@ export function isParagraphBreak(
 			skipColumns(line, cursor, indentation);
 
 			if (cursor.column - outer.column < indentation) {
-				Object.assign(cursor, outer);
-				break;
+				return { cursor: outer, isLazy: true };
 			}
 		}
 	}
 
-	while (readQuoteMarker(line, cursor)) {
-		// Each marker of an empty block quote can follow up to three columns of
-		// indentation
-	}
-
-	return /^[\t ]*$/.test(line.slice(cursor.index));
+	return { cursor, isLazy: false };
 }
 
 /**
@@ -187,22 +216,19 @@ function readPrefixes(
 	const cursor: LineCursor = { column: 0, index: 0, pending: 0 };
 
 	for (const [index, container] of containers.entries()) {
+		/* v8 ignore next -- @preserve */
 		const start = container.position?.start.offset ?? 0;
 
 		if (container.type === 'blockquote') {
 			if (!readQuoteMarker(line, cursor)) {
 				break;
 			}
-		} else if (
-			container.type === 'listItem' &&
-			start >= lineStart &&
-			start <= lineStart + line.length
-		) {
+		} else if (start >= lineStart && start <= lineStart + line.length) {
 			cursor.column = measureColumns(line.slice(0, start - lineStart));
 			cursor.index = start - lineStart;
 			cursor.pending = 0;
 			readListMarker(line, cursor);
-		} else if (container.type === 'listItem') {
+		} else {
 			skipColumns(
 				line,
 				cursor,
@@ -227,10 +253,10 @@ function getListItemIndentation(
 	item: AST.Node,
 	containers: ReadonlyArray<AST.Node>
 ): number {
+	/* v8 ignore next -- @preserve */
 	const start = item.position?.start.offset ?? 0;
 	const lineStart = source.lastIndexOf('\n', start - 1) + 1;
-	const lineEnd = source.indexOf('\n', start);
-	const line = source.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+	const line = source.slice(lineStart, findLineEnd(source, start));
 	const contentStart = readPrefixes(
 		source,
 		lineStart,
@@ -255,6 +281,7 @@ function getListItemIndentation(
  * one column.
  */
 function readListMarker(line: string, cursor: LineCursor): void {
+	/* v8 ignore next -- @preserve */
 	const marker =
 		LIST_MARKER_PATTERN.exec(line.slice(cursor.index))?.[0] ?? '';
 	cursor.column += marker.length;
@@ -357,6 +384,15 @@ function readIndentation(line: string, cursor: LineCursor): number[] {
 	}
 
 	return indentation;
+}
+
+/**
+ * Finds the line break that ends the line containing an offset. Returns
+ * `undefined` on the last line, which ends with the source.
+ */
+function findLineEnd(source: string, offset: number): number | undefined {
+	const lineEnd = source.indexOf('\n', offset);
+	return lineEnd === -1 ? undefined : lineEnd;
 }
 
 /**

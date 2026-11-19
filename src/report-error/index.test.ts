@@ -6,6 +6,7 @@ import {
 	reportInvalidHTML,
 	reportUnsafeLayout,
 	reportUnsupportedMarkdown,
+	withArticle,
 } from './index.ts';
 
 test('reports errors with the file, the Markdown position, and the reason', () => {
@@ -75,11 +76,27 @@ test('keeps the formatter’s error as the cause', () => {
 	`);
 });
 
+test('reports formatter failures that aren’t errors', () => {
+	expect(() => reportFormatterFailure({ cause: 'Foo (1:2)\nBar' }))
+		.toThrowErrorMatchingInlineSnapshot(`
+		[Error: [prettier-plugin-markdown-html] Failed to format HTML with Prettier:
+
+		Foo]
+	`);
+});
+
 test('names the Markdown constructs that generate elements', () => {
 	expect(describeGeneratedElement('blockquote')).toBe('block quote');
+	expect(describeGeneratedElement('del')).toBe('strikethrough text');
 	expect(describeGeneratedElement('h3')).toBe('heading');
 	expect(describeGeneratedElement('li')).toBe('list item');
 	expect(describeGeneratedElement('p')).toBe('paragraph');
 	expect(describeGeneratedElement('td')).toBe('table cell');
 	expect(describeGeneratedElement('foo')).toBe('`<foo>`');
+});
+
+test('adds indefinite articles to the names of Markdown constructs', () => {
+	expect(withArticle('emphasized text')).toBe('emphasized text');
+	expect(withArticle('image')).toBe('an image');
+	expect(withArticle('list item')).toBe('a list item');
 });

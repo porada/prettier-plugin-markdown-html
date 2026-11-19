@@ -209,19 +209,10 @@ function startsParagraphLine(
 	paragraph: AST.GeneratedElement,
 	tag: Tag
 ): boolean {
-	const lineEnd = html.indexOf('\n', tag.end);
-
 	return (
 		paragraph.tagName === 'p' &&
 		tag.start === paragraph.openEnd &&
-		/\S/.test(
-			html.slice(
-				tag.end,
-				lineEnd === -1
-					? paragraph.closeStart
-					: Math.min(lineEnd, paragraph.closeStart)
-			)
-		)
+		/^[^\n]*\S/.test(html.slice(tag.end, paragraph.closeStart))
 	);
 }
 
@@ -328,14 +319,14 @@ function diagnoseClosedConstruct(
 	generated: AST.GeneratedElement
 ): Diagnosis | undefined {
 	const construct = describeGeneratedElement(generated.tagName);
-	const tags = context.fragments
-		.filter(
-			({ end, start }) =>
-				start >= generated.openEnd && end <= generated.closeStart
-		)
-		.flatMap(({ start }) =>
-			scanTags(context.html, start, generated.closeStart)
-		);
+	// One scan of the content reads each token once, even when it continues
+	// into a later fragment. Tags generated from Markdown are left out, so
+	// they can’t pair with raw tags of the same name
+	const tags = scanTags(
+		context.html,
+		generated.openEnd,
+		generated.closeStart
+	).filter((tag) => isRawTag(context, tag));
 	const blockTag =
 		generated.tagName === 'p'
 			? tags.find(
@@ -375,8 +366,8 @@ function diagnoseClosedConstruct(
 }
 
 /**
- * Reads the tags of a fragment, skipping opaque tokens, void elements, and
- * self-closing tags.
+ * Reads the tags that start in a range of the document, skipping opaque tokens,
+ * complete raw text elements, void elements, and self-closing tags.
  */
 function scanTags(html: string, start: number, end: number): Tag[] {
 	const tags: Tag[] = [];
@@ -393,18 +384,17 @@ function scanTags(html: string, start: number, end: number): Tag[] {
 			html.slice(offset, tagEnd)
 		);
 		const name = match?.[2]?.toLowerCase();
+		const isClosing = match?.[1] === '/';
 
+		// The token of a raw text element’s opening tag includes the element’s
+		// content and closing tag
 		if (
 			name &&
 			!isVoidTag(name) &&
+			!(isRawTextTag(name) && !isClosing) &&
 			!html.slice(offset, tagEnd).endsWith('/>')
 		) {
-			tags.push({
-				end: tagEnd,
-				isClosing: match![1] === '/',
-				name,
-				start: offset,
-			});
+			tags.push({ end: tagEnd, isClosing, name, start: offset });
 		}
 
 		offset = html.indexOf('<', Math.max(tagEnd, offset + 1));

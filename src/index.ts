@@ -47,18 +47,15 @@ function createParser(name: ParserName): Parser {
 	): Promise<unknown> {
 		const priorParser = await resolvePriorParser(options, 'parse');
 
-		const ast = priorParser
-			? await withPriorParserOptions(
-					options,
-					priorParser,
-					(delegatedOptions) =>
-						callParserWithCompatibility(
-							priorParser.parser,
-							text,
-							delegatedOptions
-						)
+		const ast = await (priorParser
+			? withPriorParserOptions(options, priorParser, (delegatedOptions) =>
+					callParserWithCompatibility(
+						priorParser.parser,
+						text,
+						delegatedOptions
+					)
 				)
-			: await callParserWithCompatibility(nativeParser, text, options);
+			: callParserWithCompatibility(nativeParser, text, options));
 
 		// Prettier skips printer preprocessing for a partial Markdown range, so
 		// validation runs during parsing

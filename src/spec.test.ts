@@ -11,6 +11,11 @@ const SPEC_EXAMPLE_OPTIONS = {
 	tabWidth: 4,
 } satisfies Options;
 
+const WRAPPING_OPTIONS = {
+	...SPEC_EXAMPLE_OPTIONS,
+	proseWrap: 'always',
+} satisfies Options;
+
 // Prettier adds code frames to parse error messages when a location is
 // available, using ANSI colors when supported
 async function getUncoloredErrorMessage(
@@ -2231,6 +2236,1257 @@ describe('Block Math Inside Paragraphs', () => {
 	});
 });
 
+describe('Table Delimiter Rows', () => {
+	test('rejects raw HTML in a paragraph with a later line that has the syntax of a delimiter row', async () => {
+		await expect(
+			format('foo <b   >bar</b>\n|---|---|\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML after a delimiter row in a paragraph', async () => {
+		await expect(
+			format('foo | bar\n|---|\n<b   >baz</b>\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML that only the reference reading finds in a table cell', async () => {
+		await expect(
+			format(
+				'- foo\n      `bar | <b>baz</b>`\n  --|--\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (3:3):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML in a table directly after paragraph text', async () => {
+		await expect(
+			format(
+				'| foo | bar |\n--|--|--\n<b   >baz</b> | qux\n--|--\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (4:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML that the reference reading puts in a table header after a list item’s indented line', async () => {
+		await expect(
+			format(
+				'- x\n      <a lang="yyyyyyyy">---</a> | bar\n  |---|---|\n  x\n',
+				{
+					...SPEC_EXAMPLE_OPTIONS,
+					parser: 'remark',
+					printWidth: 45,
+					proseWrap: 'never',
+				}
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (3:3):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML that the reference reading puts in a table header after a task list checkbox', async () => {
+		await expect(
+			format(
+				'- [ ] | foo <abbr  title="bar" lang="baz">qux</abbr>\n  | --- |\n',
+				{ ...SPEC_EXAMPLE_OPTIONS, printWidth: 30 }
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:3):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML in a table that both readings recognize', async () => {
+		const input = '| foo | <b   >bar</b> |\n| --- | --- |\n';
+		const expectedOutput = '| foo | <b>bar</b> |\n| --- | ---------- |\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML in a table that only Prettier’s Markdown parser recognizes', async () => {
+		await expect(
+			format('foo \\\\| <b   >bar</b>\n--|--\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML in a table after a paragraph whose delimiter row is lazy', async () => {
+		await expect(
+			format(
+				'> foo | bar\n--|--|--\n> <b   >baz</b> | qux\n> --|--\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (4:3):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML in a table after a blank line that ends a paragraph with a delimiter row', async () => {
+		const input = 'foo | bar\n--|--|--\n\n<b   >baz</b> | qux\n--|--\n';
+		const expectedOutput =
+			'foo | bar\n--|--|--\n\n| <b>baz</b> | qux |\n| ---------- | --- |\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML in a table directly after a setext heading', async () => {
+		await expect(
+			format(
+				'foo | bar\n--|--|--\nbaz\n===\n<b   >qux</b> | quux\n--|--\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (6:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML in a table directly after a setext heading with a hyphen underline', async () => {
+		await expect(
+			format(
+				'foo\n---\n| bar | baz |\n|---|---|\n| <b   >qux</b> | quux |\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (4:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each(['always', 'never', 'preserve'] as const)(
+		'formats raw HTML in a table directly after an ATX heading with `proseWrap` set to `%s`',
+		async (proseWrap) => {
+			const input =
+				'## foo\n| bar | baz |\n|-----|-----|\n| qux<br>quux | corge |\n';
+			const expectedOutput =
+				'## foo\n\n| bar           | baz   |\n| ------------- | ----- |\n| qux<br />quux | corge |\n';
+			const options = { ...SPEC_EXAMPLE_OPTIONS, proseWrap };
+
+			const output = await format(input, options);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, options)).resolves.toBe(output);
+		}
+	);
+
+	test.each([
+		{
+			context: 'an ATX heading in a block quote',
+			input: '> ## foo\n> | bar | baz |\n> |---|---|\n> | <b   >qux</b> | quux |\n',
+			output: '> ## foo\n>\n> | bar        | baz  |\n> | ---------- | ---- |\n> | <b>qux</b> | quux |\n',
+		},
+		{
+			context: 'an ATX heading in a list item',
+			input: '- ## foo\n  | bar | baz |\n  |---|---|\n  | <b   >qux</b> | quux |\n',
+			output: '- ## foo\n    | bar        | baz  |\n    | ---------- | ---- |\n    | <b>qux</b> | quux |\n',
+		},
+		{
+			context: 'a thematic break',
+			input: '***\n| bar | baz |\n|---|---|\n| <b   >qux</b> | quux |\n',
+			output: '***\n\n| bar        | baz  |\n| ---------- | ---- |\n| <b>qux</b> | quux |\n',
+		},
+		{
+			context: 'a thematic break in a list item',
+			input: '- ***\n  | bar | baz |\n  |---|---|\n  | <b   >qux</b> | quux |\n',
+			output: '- ***\n    | bar        | baz  |\n    | ---------- | ---- |\n    | <b>qux</b> | quux |\n',
+		},
+		{
+			context: 'a closing code fence',
+			input: '```\nfoo\n```\n| bar | baz |\n|---|---|\n| <b   >qux</b> | quux |\n',
+			output: '```\nfoo\n```\n\n| bar        | baz  |\n| ---------- | ---- |\n| <b>qux</b> | quux |\n',
+		},
+		{
+			context: 'a longer closing code fence of tildes in a block quote',
+			input: '> ~~~\n> foo\n> ~~~~\n> | bar | baz |\n> |---|---|\n> | <b   >qux</b> | quux |\n',
+			output: '> ```\n> foo\n> ```\n>\n> | bar        | baz  |\n> | ---------- | ---- |\n> | <b>qux</b> | quux |\n',
+		},
+		{
+			context: 'the end of an HTML comment',
+			input: '<!-- foo\n-->\n| bar | baz |\n|---|---|\n| <b   >qux</b> | quux |\n',
+			output: '<!-- foo\n-->\n\n| bar        | baz  |\n| ---------- | ---- |\n| <b>qux</b> | quux |\n',
+		},
+		{
+			context: 'an HTML comment on one line in a list item',
+			input: '- <!-- foo -->\n  | bar | baz |\n  |---|---|\n  | <b   >qux</b> | quux |\n',
+			output: '- <!-- foo -->\n    | bar        | baz  |\n    | ---------- | ---- |\n    | <b>qux</b> | quux |\n',
+		},
+		{
+			context: 'the closing tag of a `pre` element in a block quote',
+			input: '> <pre>\n> foo\n> </pre>\n> | bar | baz |\n> |---|---|\n> | <b   >qux</b> | quux |\n',
+			output: '> <pre>\n> foo\n> </pre>\n>\n> | bar        | baz  |\n> | ---------- | ---- |\n> | <b>qux</b> | quux |\n',
+		},
+	])(
+		'formats raw HTML in a table directly after $context',
+		async ({ input, output: expectedOutput }) => {
+			const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('keeps table syntax inside an HTML block that continues past a closing tag until a blank line', async () => {
+		const input =
+			'<div>\n</div>\n| bar | baz |\n|---|---|\n| <b   >qux</b> | quux |\n';
+		const expectedOutput =
+			'<div></div>\n| bar | baz | |---|---| | <b>qux</b> | quux |\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects raw HTML in a table after a paragraph line that the reference renderer reads as a table header', async () => {
+		await expect(
+			format(
+				'foo\n    a | b\n--|--\n<b   >baz</b> | qux\n--|--\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (5:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a delimiter row in a block quote', async () => {
+		await expect(
+			format('> foo <b   >bar</b>\n> |---|---|\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:3):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a delimiter row in a list item', async () => {
+		await expect(
+			format('- foo <b   >bar</b>\n  |---|---|\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:3):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a delimiter row on a lazy line', async () => {
+		await expect(
+			format('> foo <b   >bar</b>\n|---|---|\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a lazy delimiter row after the block quote markers present', async () => {
+		await expect(
+			format(
+				'> > foo | <b   >bar</b>\n>     :---\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:7):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a delimiter row indented three columns', async () => {
+		await expect(
+			format('foo | <b   >bar</b>\n   :---\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:4):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a delimiter row indented four columns', async () => {
+		await expect(
+			format('foo | <b   >bar</b>\n    :---\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:5):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a delimiter row indented with a tab', async () => {
+		await expect(
+			format('foo | <b   >bar</b>\n\t:---\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:2):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a delimiter row of one cell without pipes', async () => {
+		await expect(
+			format('foo | <b   >bar</b>\n:---\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each(['-', '---', '==='])(
+		'formats raw HTML in a setext heading underlined with `%s`',
+		async (underline) => {
+			const input = `foo <b   >bar</b>\n${underline}\n`;
+			const expectedOutput = `foo <b>bar</b>\n${underline}\n`;
+
+			const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('rejects raw HTML before a line of hyphens indented four columns', async () => {
+		await expect(
+			format('foo <b   >bar</b>\n    ---\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:5):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML before a lazy line of hyphens', async () => {
+		await expect(format('> foo <b   >x</b>\n--\n', SPEC_EXAMPLE_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML in a setext heading with a delimiter row in its second content line', async () => {
+		await expect(
+			format(
+				'foo <b   >bar</b>\n:---|---|---\n===\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML in a paragraph whose code span contains a line with the syntax of a delimiter row', async () => {
+		await expect(
+			format(
+				'foo `bar\n|---|---|---|\nbaz` <b   >qux</b>\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects an HTML comment that contains an indented line with the syntax of a delimiter row', async () => {
+		await expect(
+			format(
+				'foo <!-- bar\n    |---|---|---|\n--> baz\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:5):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML before hyphens separated by an escaped pipe', async () => {
+		const input = 'foo <b   >bar</b>\n--\\|--\n';
+		const expectedOutput = 'foo <b>bar</b>\n--\\|--\n';
+
+		const output = await format(input, SPEC_EXAMPLE_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			output
+		);
+	});
+
+	test('rejects markup in a code span before a delimiter row', async () => {
+		await expect(
+			format('foo `<b>bar</b>` baz\n|---|---|\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects markup in a code span across a lazy line with the syntax of a delimiter row', async () => {
+		await expect(
+			format('> foo `bar\n|---|\n> <b>baz</b>`', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects markup in a wiki link before a delimiter row', async () => {
+		await expect(format('[[foo `<b>`]]\n|---|---|\n', SPEC_EXAMPLE_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('keeps a code span with an unfinished closing tag after a literal block quote or list marker', async () => {
+		const quoteInput = 'foo `start\n    > </div\n    |---|---|\nend`\n';
+		const listInput = 'foo `start\n    - </div\n    |---|---|\nend`\n';
+
+		await expect(format(quoteInput, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			quoteInput
+		);
+		await expect(format(listInput, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			listInput
+		);
+	});
+
+	test('keeps a code span with an unfinished closing tag after a no-break space', async () => {
+		const leadingInput =
+			'foo `start\n\u00A0    </div\n    |---|---|\nend`\n';
+		const indentedInput =
+			'foo `start\n    \u00A0</div\n    |---|---|\nend`\n';
+
+		await expect(format(leadingInput, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			leadingInput
+		);
+		await expect(format(indentedInput, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(
+			indentedInput
+		);
+	});
+
+	test('rejects image descriptions before a delimiter row whether their destinations are inline or from reference definitions', async () => {
+		await expect(
+			format('![<i>foo</i>](a)\n|---|---|\n', SPEC_EXAMPLE_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(
+			format(
+				'![<i>foo</i>][r]\n|---|---|\n\n[r]: a\n',
+				SPEC_EXAMPLE_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
+
+			Prettier’s Markdown parser and GitHub Flavored Markdown can disagree on whether this line starts a table, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('keeps a paragraph that an ignore directive protects before a delimiter row', async () => {
+		const input = '<!-- prettier-ignore -->\nfoo <b>bar</b>\n|---|---|\n';
+
+		await expect(format(input, SPEC_EXAMPLE_OPTIONS)).resolves.toBe(input);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` before a word of pipes, colons, and hyphens on the first line', async () => {
+		await expect(format('foo <b   >bar</b> :---\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:19):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each([
+		{
+			context: 'pipes, colons, and hyphens',
+			input: 'foo <span title="a :--- b">x</span> bar\n',
+			output: 'foo <span title="a :--- b">x</span> bar\n',
+		},
+		{
+			context: 'equals signs',
+			input: 'foo <span id = "foo">x</span> bar\n',
+			output: 'foo <span id="foo">x</span> bar\n',
+		},
+	])(
+		'formats raw HTML with `proseWrap` set to `always` whose tags contain words of $context',
+		async ({ input, output: expectedOutput }) => {
+			const output = await format(input, WRAPPING_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('rejects escaped markup with `proseWrap` set to `always` whose attribute has a word of pipes, colons, and hyphens', async () => {
+		await expect(
+			format('foo \\<b title="a :--- b"> bar\n', WRAPPING_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:18):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML with `proseWrap` set to `always` after a word of pipes, colons, and hyphens in a code span', async () => {
+		const input = 'foo `a :--- b` <b   >bar</b>\n';
+		const expectedOutput = 'foo `a :--- b` <b>bar</b>\n';
+
+		const output = await format(input, WRAPPING_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(output);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` after an equals sign that follows a leading code span', async () => {
+		await expect(format('`foo` = <b>bar</b>\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:7):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` before two hyphens', async () => {
+		await expect(format('foo <b>bar</b> --\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:16):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` after a lone pipe', async () => {
+		await expect(format('foo | <b>bar</b>\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML with `proseWrap` set to `always` after a lone colon', async () => {
+		const input = 'foo : <b   >bar</b> baz\n';
+		const expectedOutput = 'foo : <b>bar</b> baz\n';
+
+		const output = await format(input, WRAPPING_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(output);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` before a word of equals signs', async () => {
+		await expect(format('foo <b   >bar</b> ===\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:19):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo <b   >bar</b> =\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:19):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each([
+		{ context: 'a no-break space', separator: '\u00A0' },
+		{ context: 'an em space', separator: '\u2003' },
+	])(
+		'formats raw HTML with `proseWrap` set to `always` after delimiter cells that $context joins to a word',
+		async ({ separator }) => {
+			const input = `foo${separator}:--- <b   >bar</b>\n`;
+			const expectedOutput = `foo${separator}:--- <b>bar</b>\n`;
+
+			const output = await format(input, WRAPPING_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('keeps paragraphs that ignore directives protect with `proseWrap` set to `always` before words of pipes, colons, and hyphens', async () => {
+		const nextNodeInput = '<!-- prettier-ignore -->\nfoo <b>bar</b> :---\n';
+		const rangeInput =
+			'<!-- prettier-ignore-start -->\nfoo <b>bar</b> :---\n<!-- prettier-ignore-end -->\n';
+
+		await expect(format(nextNodeInput, WRAPPING_OPTIONS)).resolves.toBe(
+			nextNodeInput
+		);
+		await expect(format(rangeInput, WRAPPING_OPTIONS)).resolves.toBe(
+			rangeInput
+		);
+	});
+
+	test.each([
+		{
+			context: 'spaces',
+			input: 'foo - <b   >bar</b>\n',
+			output: 'foo - <b>bar</b>\n',
+		},
+		{
+			context: 'tabs',
+			input: 'foo\t-\t<b   >bar</b>\n',
+			output: 'foo - <b>bar</b>\n',
+		},
+	])(
+		'formats raw HTML with `proseWrap` set to `always` after a lone hyphen between $context in the middle of a line',
+		async ({ input, output: expectedOutput }) => {
+			const output = await format(input, WRAPPING_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('rejects raw HTML with `proseWrap` set to `always` before a lone hyphen that starts a line after a hard line break', async () => {
+		const options = { ...WRAPPING_OPTIONS, printWidth: 35 };
+
+		await expect(
+			format(
+				'- [ ] <img  src="z"  alt="w">\n      <span  class="s"  id="i">v</span>\\\n      - <em>q</em> qux ![<i>a</i>][r]\n---\n\n[r]: /u\n',
+				options
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (3:7):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(
+			format(
+				'- [ ] <img  src="z"  alt="w">\n      <span  class="s"  id="i">v</span>  \n      - <em>q</em> qux ![<i>a</i>][r]\n---\n\n[r]: /u\n',
+				options
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (3:7):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` before a lone hyphen that starts a lazy line', async () => {
+		await expect(
+			format('> foo <b   >bar</b>\n    - baz\n', WRAPPING_OPTIONS)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` before a lone hyphen beside a vertical tab', async () => {
+		await expect(format('foo <b   >bar</b> -\vbaz\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:19):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML with `proseWrap` set to `always` after a first word of pipes, colons, and hyphens', async () => {
+		const input = ':--- <b   >bar</b>\n';
+		const expectedOutput = ':--- <b>bar</b>\n';
+
+		const output = await format(input, WRAPPING_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(output);
+	});
+
+	test.each([
+		{
+			context: 'an ATX heading',
+			input: '# foo <b   >bar</b> :---\n',
+			output: '# foo <b>bar</b> :---\n',
+		},
+		{
+			context: 'an ATX heading in a list item',
+			input: '- # -- <b   >x</b>\n',
+			output: '- # -- <b>x</b>\n',
+		},
+	])(
+		'formats raw HTML with `proseWrap` set to `always` in $context before a word of pipes, colons, and hyphens',
+		async ({ input, output: expectedOutput }) => {
+			const output = await format(input, WRAPPING_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('formats raw HTML with `proseWrap` set to `always` beside equals signs in the text of an inline link', async () => {
+		const input = 'foo [a === b](/link) <b   >x</b>\n';
+		const expectedOutput = 'foo\n[a === b](/link)\n<b\n    >x</b>\n';
+		const options = { ...WRAPPING_OPTIONS, printWidth: 1 };
+
+		const output = await format(input, options);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, options)).resolves.toBe(output);
+	});
+
+	test('formats raw HTML with `proseWrap` set to `always` beside equals signs in the separate label of a reference link', async () => {
+		const input = 'foo [a][x === y] <b   >x</b>\n\n[x === y]: /link\n';
+		const expectedOutput =
+			'foo [a][x === y] <b>x</b>\n\n[x === y]: /link\n';
+
+		const output = await format(input, WRAPPING_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(output);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` beside equals signs in the visible text of a reference link', async () => {
+		await expect(
+			format(
+				'foo [a === b][r] <b   >x</b>\n\n[r]: /link\n',
+				WRAPPING_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:8):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` before words that could open a code fence', async () => {
+		const options = { ...WRAPPING_OPTIONS, printWidth: 13 };
+
+		await expect(format('foo <br> ~~~ longlonglong\n========\n', options))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:10):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(
+			format('foo <b>x</b> ![<i>z</i>][r] ~~~\n\n[r]: /r\n', options)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:29):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo <b   >x</b> ```a\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:17):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each([
+		{ name: 'a line separator', separator: '\u2028' },
+		{ name: 'a paragraph separator', separator: '\u2029' },
+	])(
+		'rejects raw HTML with `proseWrap` set to `always` before tildes that could open a code fence with $name later in the word',
+		async ({ separator }) => {
+			await expect(
+				format(`foo <br> ~~~${separator}x\n========\n`, {
+					...WRAPPING_OPTIONS,
+					printWidth: 14,
+				})
+			).rejects.toThrow(
+				'Unsupported Markdown (1:10):\n\nWith `proseWrap` set to `always`, Prettier can move this word to the start of a line'
+			);
+		}
+	);
+
+	test('rejects raw HTML with `proseWrap` set to `always` after a first word that could open a code fence', async () => {
+		await expect(format('- [ ] ~~~ <b   >x</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:7):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML with `proseWrap` set to `always` beside backticks with another backtick in the same word', async () => {
+		const input = 'foo ```a` <b   >x</b>\n';
+		const expectedOutput = 'foo ```a` <b>x</b>\n';
+
+		const output = await format(input, WRAPPING_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(output);
+	});
+
+	test.each(['never', 'preserve'] as const)(
+		'formats raw HTML before a word of pipes, colons, and hyphens with `proseWrap` set to `%s`',
+		async (proseWrap) => {
+			const input = 'foo <b   >bar</b> :---\n';
+			const expectedOutput = 'foo <b>bar</b> :---\n';
+			const options = { ...SPEC_EXAMPLE_OPTIONS, proseWrap };
+
+			const output = await format(input, options);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, options)).resolves.toBe(output);
+		}
+	);
+
+	test('rejects raw HTML in setext headings with `proseWrap` set to `always` beside words of pipes, colons, and hyphens', async () => {
+		await expect(
+			format('foo <br /> :---\n=======\n', {
+				...WRAPPING_OPTIONS,
+				printWidth: 13,
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:12):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(
+			format('foo | <br> :---\n=======\n', {
+				...WRAPPING_OPTIONS,
+				printWidth: 15,
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(
+			format('foo <!-- e --> |-| ggg\n===\n', {
+				...WRAPPING_OPTIONS,
+				printWidth: 14,
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:16):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML after an image description with `proseWrap` set to `always` before a word of pipes and hyphens', async () => {
+		await expect(
+			format(
+				'![<i>a</i>][r] <b>fff</b> |-| ggg\n\n[r]: /u\n',
+				WRAPPING_OPTIONS
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:27):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects a long list of items with comments and words of pipes, colons, and hyphens with `proseWrap` set to `always`', async () => {
+		const input = `${Array.from(
+			{ length: 400 },
+			() => '- foo <!-- note --> :--- bar'
+		).join('\n')}\n`;
+
+		await expect(format(input, WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:21):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` after a first word of thematic break markers', async () => {
+		await expect(
+			format('- *** <em>q</em> foo\n', {
+				...WRAPPING_OPTIONS,
+				printWidth: 8,
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` beside words of three or more thematic break markers', async () => {
+		await expect(format('foo **** <b   >x</b>\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo ___ <b   >x</b>\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML with `proseWrap` set to `always` beside escaped thematic break markers', async () => {
+		const input = 'foo \\*\\*\\* <b   >x</b>\n';
+		const expectedOutput = 'foo \\*\\*\\* <b>x</b>\n';
+
+		const output = await format(input, WRAPPING_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(output);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` beside groups of thematic break markers', async () => {
+		await expect(format('foo ** * <b   >x</b>\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo _ _ _ <b   >x</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo _\n_ _ <b   >x</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo\n    \v_ _ _ <b   >x</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:6):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` before lone asterisks that start a content line', async () => {
+		await expect(
+			format('foo <b   >x</b>\\\n    * * * bar\n', {
+				...WRAPPING_OPTIONS,
+				printWidth: 12,
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each([
+		{
+			context: 'lone asterisks in the middle of a line',
+			input: 'foo * * * <b   >x</b>\n',
+			output: 'foo * * * <b>x</b>\n',
+		},
+		{
+			context: 'underscores that a hard line break separates',
+			input: 'foo _  \n_ _ <b   >x</b>\n',
+			output: 'foo _  \n_ _ <b>x</b>\n',
+		},
+		{
+			context: 'underscores that a vertical tab separates',
+			input: 'foo _\v_ _ <b   >x</b>\n',
+			output: 'foo _\v_ _ <b>x</b>\n',
+		},
+	])(
+		'formats raw HTML with `proseWrap` set to `always` beside $context',
+		async ({ input, output: expectedOutput }) => {
+			const output = await format(input, WRAPPING_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('rejects raw HTML with `proseWrap` set to `always` after a first word whose markers complete a thematic break with the list bullet', async () => {
+		await expect(format('- -- <b   >x</b>\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('- foo\n\n* ** <b   >x</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (3:3):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each([
+		{
+			context: 'in a task list item',
+			input: '- [ ] -- <b   >x</b>\n',
+			output: '- [ ] -- <b>x</b>\n',
+		},
+		{
+			context: 'in an ordered list item',
+			input: '1. -- <b   >x</b>\n',
+			output: '1. -- <b>x</b>\n',
+		},
+		{
+			context: 'after the first paragraph of a list item',
+			input: '- foo\n\n  -- <b   >x</b>\n',
+			output: '- foo\n\n    -- <b>x</b>\n',
+		},
+	])(
+		'formats raw HTML with `proseWrap` set to `always` after a first word of two hyphens $context',
+		async ({ input, output: expectedOutput }) => {
+			const output = await format(input, WRAPPING_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test('rejects raw HTML with `proseWrap` set to `always` beside the unfinished start of an HTML block', async () => {
+		await expect(format('foo <div bar <b   >x</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo <!-- bar <b   >x</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('formats raw HTML with `proseWrap` set to `always` beside an escaped HTML block start', async () => {
+		const input = 'foo \\<div bar <b   >x</b>\n';
+		const expectedOutput = 'foo \\<div bar <b>x</b>\n';
+
+		const output = await format(input, WRAPPING_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(output);
+	});
+
+	test('rejects a paragraph without raw HTML syntax with `proseWrap` set to `always` when a later word would open an HTML block', async () => {
+		await expect(
+			format(
+				'  - [x] qux - | <div `:---` bar\n        foo foo\n        foo\n',
+				{
+					...WRAPPING_OPTIONS,
+					printWidth: 14,
+				}
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:15):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo <!-- bar\n', WRAPPING_OPTIONS)).rejects
+			.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('foo bar\nbaz <div qux\n===\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each([
+		{ context: 'after an escaped `<`', markdown: 'foo \\<div bar\n' },
+		{
+			context: 'that can’t interrupt a paragraph',
+			markdown: 'foo <span bar\n',
+		},
+		{ context: 'in a code span', markdown: 'foo `<div` bar\n' },
+		{
+			context: 'in the text of an inline link',
+			markdown: 'foo [bar <div baz](/u) = qux\n',
+		},
+		{
+			context: 'as the first word after a task list checkbox',
+			markdown: '- [ ] <div foo = bar\n',
+		},
+		{ context: 'in an ATX heading', markdown: '# foo <div bar\n' },
+	])(
+		'keeps a block without raw HTML syntax with `proseWrap` set to `always` beside a possible HTML block start $context',
+		async ({ markdown }) => {
+			const output = await format(markdown, WRAPPING_OPTIONS);
+
+			expect(output).toBe(markdown);
+			await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+
+	test.each(['never', 'preserve'] as const)(
+		'keeps a paragraph without raw HTML syntax beside an unfinished HTML block start with `proseWrap` set to `%s`',
+		async (proseWrap) => {
+			const markdown = 'foo <div bar\n';
+			const options = { ...SPEC_EXAMPLE_OPTIONS, proseWrap };
+
+			const output = await format(markdown, options);
+
+			expect(output).toBe(markdown);
+			await expect(format(output, options)).resolves.toBe(output);
+		}
+	);
+
+	test('rejects raw HTML with `proseWrap` set to `always` in a task list item that starts with a possible link reference definition', async () => {
+		await expect(
+			format(
+				'  - [x] [^a]: foo <span  :--- title="longer">v</span> `:---` <em>q</em>\n\n[^a]: v\n',
+				{ ...WRAPPING_OPTIONS, printWidth: 24 }
+			)
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:9):
+
+			With \`proseWrap\` set to \`always\`, a line break that Prettier adds can complete a link reference definition that starts here, which would change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('- [ ]  [a]: foo <b>x</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:8):
+
+			With \`proseWrap\` set to \`always\`, a line break that Prettier adds can complete a link reference definition that starts here, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test('rejects raw HTML with `proseWrap` set to `always` after a possible link reference definition whose label spans lines', async () => {
+		await expect(format('[foo\nbar]: x <b>y</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:1):
+
+			With \`proseWrap\` set to \`always\`, a line break that Prettier adds can complete a link reference definition that starts here, which would change the context of nearby HTML or HTML-like markup]
+		`);
+		await expect(format('> [foo\n> bar]: x <b>y</b>\n', WRAPPING_OPTIONS))
+			.rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (1:3):
+
+			With \`proseWrap\` set to \`always\`, a line break that Prettier adds can complete a link reference definition that starts here, which would change the context of nearby HTML or HTML-like markup]
+		`);
+	});
+
+	test.each([
+		{ context: 'without a space', markdown: '[foo]:/bar <b>x</b>\n' },
+		{
+			context: 'with an escaped bracket in its label',
+			markdown: '[a\\]b]: foo <b>x</b>\n',
+		},
+		{
+			context: 'whose label Prettier reads as a reference',
+			markdown: '[foo]: x <b>y</b>\n\n[foo]: /u\n',
+		},
+		{
+			context: 'in a setext heading of level 1',
+			markdown: '[foo]: x <b>y</b>\n===\n',
+		},
+		{
+			context: 'in a setext heading of level 2',
+			markdown: '[foo]: x <b>y</b>\n---\n',
+		},
+	])(
+		'rejects raw HTML with `proseWrap` set to `always` after a possible link reference definition $context',
+		async ({ markdown }) => {
+			await expect(format(markdown, WRAPPING_OPTIONS)).rejects.toThrow(
+				'Unsupported Markdown (1:1):\n\nWith `proseWrap` set to `always`, a line break that Prettier adds can complete a link reference definition'
+			);
+		}
+	);
+
+	test('formats raw HTML with `proseWrap` set to `always` after an escaped opening bracket of a possible link reference definition', async () => {
+		const input = '\\[foo]: <b   >x</b>\n';
+		const expectedOutput = '\\[foo]: <b>x</b>\n';
+
+		const output = await format(input, WRAPPING_OPTIONS);
+
+		expect(output).toBe(expectedOutput);
+		await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(output);
+	});
+
+	test.each([
+		{ context: 'with a blank label', input: '[ ]: foo <b   >x</b>\n' },
+		{ context: 'without a colon', input: '[a] : foo <b   >x</b>\n' },
+		{
+			context: 'after another unescaped bracket',
+			input: '[a[b]: foo <b   >x</b>\n',
+		},
+		{
+			context: 'after the first word',
+			input: 'foo [a]: <b   >x</b>\n',
+		},
+		{
+			context: 'after a task list checkbox and another word',
+			input: '- [x] [x] [a]: foo <b   >x</b>\n',
+		},
+		{ context: 'in an ATX heading', input: '# [a]: foo <b   >x</b>\n' },
+	])(
+		'formats raw HTML with `proseWrap` set to `always` after brackets $context',
+		async ({ input }) => {
+			const expectedOutput = input.replace('<b   >', '<b>');
+
+			const output = await format(input, WRAPPING_OPTIONS);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, WRAPPING_OPTIONS)).resolves.toBe(
+				output
+			);
+		}
+	);
+});
+
 describe('HTML in Document Context', () => {
 	test('formats raw HTML around elements generated from Markdown', async () => {
 		const input = `foo <b >_bar_</b>
@@ -3186,9 +4442,9 @@ describe('Formatting Decisions', () => {
 				proseWrap: 'always',
 			})
 		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (2:1):
+			[Error: [prettier-plugin-markdown-html] Unsupported Markdown (2:1):
 
-			With \`proseWrap\` set to \`always\`, Prettier’s Markdown formatting can wrap this line here, where it would open a code fence, and later raw HTML could render as code]
+			With \`proseWrap\` set to \`always\`, Prettier can move this word to the start of a line, where it can open another Markdown block and change the context of nearby HTML or HTML-like markup]
 		`);
 	});
 
@@ -3303,6 +4559,45 @@ describe('Formatting Decisions', () => {
 			})
 		).rejects.toThrowErrorMatchingInlineSnapshot(`
 			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:5):
+
+			With \`proseWrap\` set to \`always\`, Prettier’s Markdown formatting can wrap this line here, where it would open a code fence, and later raw HTML could render as code]
+		`);
+	});
+
+	test.each([
+		{
+			input: 'foo [a ~~~ b](/link) <b>x</b>\n',
+			output: 'foo\n[a ~~~ b](/link)\n<b\n    >x</b>\n',
+		},
+		{
+			input: 'foo [a ~~~ b](/link)\n\n<b>x</b>\n',
+			output: 'foo\n[a ~~~ b](/link)\n\n<b\n    >x</b>\n',
+		},
+	])(
+		'formats raw HTML with `proseWrap` set to `always` after tildes in the text of an inline link',
+		async ({ input, output: expectedOutput }) => {
+			const options = {
+				...SPEC_EXAMPLE_OPTIONS,
+				printWidth: 1,
+				proseWrap: 'always',
+			} as const;
+
+			const output = await format(input, options);
+
+			expect(output).toBe(expectedOutput);
+			await expect(format(output, options)).resolves.toBe(output);
+		}
+	);
+
+	test('rejects raw HTML with `proseWrap` set to `always` after tildes in the visible text of a reference link', async () => {
+		await expect(
+			format('foo [a ~~~ b][r]\n\n<b>x</b>\n\n[r]: /link\n', {
+				...SPEC_EXAMPLE_OPTIONS,
+				printWidth: 1,
+				proseWrap: 'always',
+			})
+		).rejects.toThrowErrorMatchingInlineSnapshot(`
+			[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:8):
 
 			With \`proseWrap\` set to \`always\`, Prettier’s Markdown formatting can wrap this line here, where it would open a code fence, and later raw HTML could render as code]
 		`);

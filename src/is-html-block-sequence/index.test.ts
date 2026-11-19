@@ -1,8 +1,11 @@
 import { expect, test } from 'vite-plus/test';
 import isHTMLBlockSequence, {
 	canInterruptParagraph,
+	findHTMLBlockEnd,
 	findNonBlockLine,
 	needsCompleteTagLine,
+	readTakenInHTML,
+	startsHTMLBlock,
 } from './index.ts';
 
 test('accepts HTML blocks for every start condition', () => {
@@ -91,6 +94,27 @@ test('detects lines that can interrupt paragraphs in the reference renderer', ()
 	expect(canInterruptParagraph('</pre>')).toBe(false);
 });
 
+test('detects lines that start HTML blocks, including Prettier’s block tags', () => {
+	expect(startsHTMLBlock('<div>foo')).toBe(true);
+	expect(startsHTMLBlock('<search>foo')).toBe(true);
+	expect(startsHTMLBlock('<span>foo')).toBe(false);
+});
+
+test('finds the end conditions of HTML blocks that have one', () => {
+	expect(findHTMLBlockEnd('<!-- foo')).toStrictEqual(/-->/);
+	expect(findHTMLBlockEnd('<pre>')).toStrictEqual(
+		/<\/(?:pre|script|style|textarea)>/i
+	);
+	expect(findHTMLBlockEnd('<div>')).toBeUndefined();
+	expect(findHTMLBlockEnd('<span>')).toBeUndefined();
+});
+
+test('detects lines that start HTML blocks after spaces and tabs only', () => {
+	expect(startsHTMLBlock(' \t<search>foo')).toBe(true);
+	expect(startsHTMLBlock('\u00A0<search>foo')).toBe(false);
+	expect(startsHTMLBlock('\u00A0</div')).toBe(false);
+});
+
 test('detects first tags that need a complete tag line', () => {
 	expect(needsCompleteTagLine('<span title="foo">bar')).toBe(true);
 	expect(needsCompleteTagLine('</pre>')).toBe(true);
@@ -100,8 +124,19 @@ test('detects first tags that need a complete tag line', () => {
 	expect(needsCompleteTagLine('<!-- foo -->')).toBe(false);
 });
 
+test('detects first tags that need a complete tag line after spaces and tabs only', () => {
+	expect(needsCompleteTagLine(' \t<span title="foo">bar')).toBe(true);
+	expect(needsCompleteTagLine('\u00A0<span title="foo">bar')).toBe(false);
+});
+
 test('finds the first line that doesn’t read as part of an HTML block', () => {
 	expect(findNonBlockLine('<!-- foo -->\n>')).toBe(1);
 	expect(findNonBlockLine('<!-- foo\n>\nbar -->')).toBeUndefined();
 	expect(findNonBlockLine('<div>\n\nfoo')).toBe(2);
+});
+
+test('reads how a block that continues until a blank line takes in later HTML', () => {
+	expect(readTakenInHTML('<p>foo</p>\n<p>bar</p>')).toBe('continues');
+	expect(readTakenInHTML('<p>foo</p>\n\n<p>bar</p>')).toBe('ends');
+	expect(readTakenInHTML('<pre>\nfoo\n\nbar\n</pre>')).toBe('splits');
 });

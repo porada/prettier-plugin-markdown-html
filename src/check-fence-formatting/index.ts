@@ -3,6 +3,7 @@ import type { AST } from '../types/index.d.ts';
 import * as pluginMarkdown from 'prettier/plugins/markdown';
 import {
 	FENCE_OPENING_PATTERN,
+	findTextNodes,
 	hasRawHTML,
 	toPoint,
 } from '../render-document-context/index.ts';
@@ -14,7 +15,7 @@ const CHARACTER_REFERENCE_PATTERN =
 	/&(?:#\d{1,7}|#[Xx][\dA-Fa-f]{1,6}|[A-Za-z][\dA-Za-z]{1,31});/;
 
 // A fence opening at the start of a code block’s source, and its info string
-const FENCE_PATTERN = /^(`{3,}|~{3,})(.*)/;
+const FENCE_PATTERN = /^(`{3,}|~{3,})(.*)/s;
 
 // A run of backticks or tildes long enough to open a fence
 const FENCE_RUN_PATTERN = /`{3,}|~{3,}/g;
@@ -95,9 +96,11 @@ function visit(
 /**
  * Checks the later lines of a paragraph or setext heading for indentation that
  * hides a fence opening, and a paragraph’s text for words that wrapping could
- * move to a line start. After a link reference definition, the reference
- * profile continues the definition’s paragraph on an indented line, so the
- * first line counts too. Lines that continue inline HTML don’t count.
+ * move to a line start. Only spaces and tabs indent a line, and the words
+ * exclude the inline constructs that Prettier keeps together, such as inline
+ * links. After a link reference definition, the reference profile continues
+ * the definition’s paragraph on an indented line, so the first line counts
+ * too. Lines that continue inline HTML don’t count.
  */
 function checkParagraph(
 	paragraph: AST.Node,
@@ -131,7 +134,7 @@ function checkParagraph(
 	let lineStart = 0;
 
 	for (const [index, line] of lines.entries()) {
-		const content = line.trimStart();
+		const content = line.replace(/^[\t ]+/, '');
 		// With `proseWrap` set to `never`, Prettier joins the lines unless a
 		// hard break ends the previous one
 		const startsLine =
@@ -162,16 +165,24 @@ function checkParagraph(
 		return;
 	}
 
-	for (const text of findTexts(paragraph)) {
-		const start = text.position?.start.offset ?? 0;
-		const value = source.slice(start, text.position?.end.offset);
+	for (const text of findTextNodes(paragraph)) {
+		const start = text.position?.start.offset;
+		const end = text.position?.end.offset;
+
+		// Without its source offsets, the text’s words can’t be found
+		if (start === undefined || end === undefined) {
+			continue;
+		}
+
+		const value = source.slice(start, end);
 
 		for (const { 0: run, index } of value.matchAll(FENCE_RUN_PATTERN)) {
 			const offset = start + index;
-			const word = source.slice(offset).split(/\s/, 1)[0]!;
+			const word = source.slice(offset).split(/[\t\n\v\f ]/, 1)[0]!;
 
 			if (
-				(offset === paragraphStart || /\s/.test(source[offset - 1]!)) &&
+				(offset === paragraphStart ||
+					/[\t\n\v\f ]/.test(source[offset - 1]!)) &&
 				(run.startsWith('~') || !word.slice(run.length).includes('`'))
 			) {
 				reportFence(
@@ -215,7 +226,7 @@ function checkFenceInfo(code: AST.Node, state: CheckState): void {
 		);
 	}
 
-	if (decodesToBacktick(code, state.options)) {
+	if (decodesToBacktick(code)) {
 		reportFence(
 			start,
 			'Prettier’s Markdown formatting would decode a character reference in this fence’s info string into a backtick, which GitHub Flavored Markdown doesn’t allow there, so markup in the fence could become raw HTML',
@@ -231,38 +242,35 @@ function checkFenceInfo(code: AST.Node, state: CheckState): void {
  * Markdown parser decodes it, which can form another character reference.
  * Decoding shortens the info string, so the passes end.
  */
-function decodesToBacktick(code: AST.Node, options: ParserOptions): boolean {
-	const parser =
-		pluginMarkdown.parsers[
-			options.parser === 'remark' ? 'remark' : 'markdown'
-		];
-	let node: CodeNode | undefined = code;
+function decodesToBacktick(code: AST.Node): boolean {
+	// Prettier’s `remark` parser is the `markdown` parser under another name
+	const parser = pluginMarkdown.parsers.markdown;
+	let info = printInfo(code);
 	let previous: string | undefined;
 
-	while (node?.type === 'code') {
-		// Prettier prints the language and metadata separated by a space
-		const info: string = [node.lang, node.meta].filter(Boolean).join(' ');
-
-		if (info.includes('`')) {
-			return true;
-		}
-
-		// Only character references and backslash escapes change when decoded
-		if (info === previous || !/[&\\]/.test(info)) {
-			return false;
-		}
-
+	// Only character references and backslash escapes change when decoded
+	while (!info.includes('`') && info !== previous && /[&\\]/.test(info)) {
 		const text = `\`\`\`${info}\n\`\`\`\n`;
 
 		previous = info;
-		[node] = (
-			parser.parse(text, {
-				originalText: text,
-			} as ParserOptions) as AST.RootNode
-		).children;
+		info = printInfo(
+			(
+				parser.parse(text, {
+					originalText: text,
+				} as ParserOptions) as AST.RootNode
+			).children[0]
+		);
 	}
 
-	return false;
+	return info.includes('`');
+}
+
+/**
+ * Prints a fenced code block’s info string as Prettier does, with the language
+ * and metadata separated by a space.
+ */
+function printInfo(code: CodeNode | undefined): string {
+	return [code?.lang, code?.meta].filter(Boolean).join(' ');
 }
 
 /**
@@ -277,12 +285,9 @@ function reportFence(
 	exposesMarkup = false
 ): void {
 	const { options, source } = state;
-	const [run] = /^(?:`+|~+)/.exec(source.slice(offset)) ?? [''];
+	const rest = source.slice(offset).replace(/^(?:`+|~+)/, '');
 
-	if (
-		exposesMarkup ||
-		hasRawHTML(source.slice(offset + run.length).split('\n'))
-	) {
+	if (exposesMarkup || hasRawHTML(rest.split('\n'))) {
 		reportUnsafeLayout({
 			filepath: options.filepath,
 			position: toPoint(source, offset),
@@ -302,17 +307,5 @@ function isInInlineToken(node: AST.Node, offset: number): boolean {
 				(child.position?.start.offset ?? 0) < offset &&
 				offset < (child.position?.end.offset ?? 0)) ||
 			isInInlineToken(child, offset)
-	);
-}
-
-/**
- * Finds the text within a node, in source order. Prettier’s printer
- * preprocessing turns text nodes into sentences.
- */
-function findTexts(node: AST.Node): AST.Node[] {
-	return (node.children ?? []).flatMap((child) =>
-		child.type === 'sentence' || child.type === 'text'
-			? [child]
-			: findTexts(child)
 	);
 }

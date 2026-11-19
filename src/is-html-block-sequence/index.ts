@@ -105,12 +105,23 @@ export function canInterruptParagraph(line: string): boolean {
 }
 
 /**
+ * Returns the end condition of the HTML block that a line starts in the
+ * reference renderer. Blocks without one continue until a blank line.
+ */
+export function findHTMLBlockEnd(line: string): RegExp | undefined {
+	return readHTMLBlockStart(line, false)?.end;
+}
+
+/**
  * Checks whether a line starts an HTML block outside a paragraph under the
  * reference renderer’s rules, also accepting tags that Prettier treats as block
  * tags.
  */
 export function startsHTMLBlock(line: string): boolean {
-	const tagName = HTML_TAG_NAME_PATTERN.exec(line.trimStart())?.[1];
+	// Only spaces and tabs indent a line
+	const tagName = HTML_TAG_NAME_PATTERN.exec(
+		line.replace(/^[\t ]+/, '')
+	)?.[1];
 
 	return (
 		readHTMLBlockStart(line, false) !== undefined ||
@@ -123,16 +134,16 @@ export function startsHTMLBlock(line: string): boolean {
  * start an HTML block under both parsers.
  */
 export function needsCompleteTagLine(html: string): boolean {
-	const match = HTML_TAG_NAME_PATTERN.exec(html.trimStart());
-	const tagName = match?.[1]?.toLowerCase();
+	// Only spaces and tabs indent a line
+	const content = html.replace(/^[\t ]+/, '');
+	const tagName = HTML_TAG_NAME_PATTERN.exec(content)?.[1]?.toLowerCase();
 
 	if (!tagName) {
 		return false;
 	}
 
 	return !(
-		HTML_RAW_BLOCK_START_PATTERN.test(html.trimStart()) ||
-		isSharedBlockTag(tagName)
+		HTML_RAW_BLOCK_START_PATTERN.test(content) || isSharedBlockTag(tagName)
 	);
 }
 

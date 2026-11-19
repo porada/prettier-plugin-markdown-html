@@ -5,12 +5,14 @@ import {
 	canInterruptParagraph,
 	containsRawHTML,
 	endsInContinuingBlock,
+	findHTMLBlockEnd,
 	startsHTMLBlock,
 } from '../is-html-block-sequence/index.ts';
 import isLooseList from '../is-loose-list/index.ts';
 import { reportUnsupportedMarkdown } from '../report-error/index.ts';
 import sliceMarkdownSource, {
 	isParagraphBreak,
+	measureLineIndentation,
 } from '../slice-markdown-source/index.ts';
 
 // Indentation and block quote and list item markers at the start of a line
@@ -21,6 +23,11 @@ const CONTAINER_PREFIX_PATTERN =
 // some that the reference renderer reads as text
 const CONTAINER_START_PATTERN =
 	/^ {0,3}(?:>|[*+-](?:[\t ]|$)|\d{1,9}[).](?:[\t ]|$))/;
+
+// The syntax of a table delimiter row after its indentation: cells of hyphens
+// with optional colons, separated by pipes, with optional pipes at both ends
+const DELIMITER_ROW_PATTERN =
+	/^\|?[\t\v\f ]*:?-+:?[\t\v\f ]*(?:\|[\t\v\f ]*:?-+:?[\t\v\f ]*)*\|?[\t\v\f ]*$/;
 
 // A possible fence opening after up to three spaces. A backtick fence’s info
 // string can’t contain a backtick
@@ -37,6 +44,11 @@ const FENCE_READING_TYPES: ReadonlySet<string> = new Set([
 	'math',
 ]);
 
+// A word that could open a code fence at the start of a line: three or more
+// backticks with no backtick after them, or three or more tildes followed by
+// anything
+const FENCE_WORD_PATTERN = /^(?:`{3,}[^`]*$|~{3})/;
+
 // This pattern matches inline declarations recognized by the reference
 // renderer: `<!`, an uppercase name, ASCII whitespace, and the rest up to `>`
 const GFM_DECLARATION_PATTERN = /^<![A-Z]+[\t\n\v\f\r ][^>]*>$/;
@@ -46,21 +58,81 @@ const GFM_DECLARATION_PATTERN = /^<![A-Z]+[\t\n\v\f\r ][^>]*>$/;
 // image text. A backslash before each one makes Prettier read it as text
 const INLINE_SYNTAX_PATTERN = /\$|\{(?=[%{])|(?<=\[)\^/g;
 
+// The blocks whose source the delimiter row check reads, including tables
+// that only Prettier’s Markdown parser recognizes
+const SOURCE_BLOCK_TYPES: ReadonlySet<string | undefined> = new Set([
+	'heading',
+	'paragraph',
+	'table',
+]);
+
 // The first bracket of a wiki link opener. A zero-width space after it keeps
 // Prettier from reading a wiki link without changing how brackets pair
 const WIKI_LINK_PATTERN = /\[(?=\[)/g;
+
+// The blocks with raw HTML syntax of each document context, apart from tables
+// that both readings recognize
+const delimiterRowChecks = new WeakMap<
+	AST.DocumentContext,
+	DelimiterRowCheck[]
+>();
 
 type RenderOptions = {
 	// Whether to compare raw HTML in blocks with math, Liquid tags, wiki links,
 	// or footnote references against their reference reading, which a reading
 	// of a single construct skips. When frontmatter or a footnote definition
-	// hides a link reference definition, any block with a bracket counts
+	// hides a link reference definition, any block with a bracket counts. The
+	// same reading skips the check for lines that look like table delimiter rows
 	checksInlineSyntax?: boolean;
 	filepath?: string | undefined;
 	parserName?: 'markdown' | 'remark';
 	// The original Markdown source, used to recover the reference renderer’s
 	// interpretation of syntax specific to Prettier
 	source?: string | undefined;
+};
+
+// A block whose lines can start a table, or whose wrapping can open another
+// Markdown block or complete a link reference definition, near raw HTML or a
+// word that could open an HTML block
+export type DelimiterRowCheck = {
+	block: AST.Node;
+	// The first content line after the first with the syntax of a delimiter row
+	line: AST.Point | undefined;
+	// Finds what wrapping could change in a paragraph or setext heading. Only
+	// `proseWrap` set to `always` needs the words
+	findWrapHazards: () => WrapHazards | undefined;
+};
+
+export type WrapHazards = {
+	// The start of a possible link reference definition that a line break
+	// could complete
+	definition: AST.Point | undefined;
+	// The first word that Prettier could move to the start of a line, where it
+	// could open another Markdown block
+	word: AST.Point | undefined;
+};
+
+type WrappableWord = {
+	// Whether only spaces, tabs, or a soft line break separate the word from
+	// the one before it
+	isJoined: boolean;
+	// Whether the word is a lone hyphen that Prettier keeps with the word
+	// before it in the middle of a line
+	isKeptHyphen: boolean;
+	isLineStart: boolean;
+	// Whether Prettier’s Markdown parser reads the word’s start as text that
+	// Prettier can wrap
+	isText: boolean;
+	offset: number;
+	value: string;
+};
+
+type BlockLine = {
+	// The line’s text after the container prefixes present on it and its
+	// leading spaces and tabs
+	content: string;
+	// The source offset of the line’s content
+	offset: number;
 };
 
 type Reading = {
@@ -177,6 +249,13 @@ export default function renderDocumentContext(
 
 	renderChildren(root, state, false);
 	context.html = state.output.join('');
+
+	if (options.source !== undefined && options.checksInlineSyntax !== false) {
+		delimiterRowChecks.set(
+			context,
+			findDelimiterRowChecks(root, options.source)
+		);
+	}
 
 	return context;
 }
@@ -625,22 +704,21 @@ function renderFragment(
 	}
 
 	const start = state.length;
-	const original = state.isReading ? state.substitutes.get(node) : node;
+	// A reading reports raw HTML without a substitute before rendering it
+	const original = state.isReading ? state.substitutes.get(node)! : node;
 
 	write(state, html);
 
-	if (original) {
-		state.context.fragments.push({
-			block: isBlock ? undefined : state.block,
-			end: state.length,
-			isBlock,
-			isInTableCell,
-			isSingleLine: state.isSingleLine,
-			node: original,
-			parent,
-			start,
-		});
-	}
+	state.context.fragments.push({
+		block: isBlock ? undefined : state.block,
+		end: state.length,
+		isBlock,
+		isInTableCell,
+		isSingleLine: state.isSingleLine,
+		node: original,
+		parent,
+		start,
+	});
 
 	if (isBlock) {
 		write(state, '\n');
@@ -697,7 +775,7 @@ function canLeaveToPrettier(
 
 	const sourceLines = source.split('\n');
 	const isBreak = createBreakCheck(source, containers);
-	const siblings = parent.children ?? [];
+	const siblings = parent.children!;
 	const index = siblings.indexOf(node);
 	const previous = siblings[index - 1];
 	const next = siblings[index + 1];
@@ -797,7 +875,7 @@ function isIsolated(
 	const isBreak = createBreakCheck(source, containers);
 
 	return (
-		((parent.children ?? []).indexOf(node) === 0 || isBreak(start - 2)) &&
+		(parent.children!.indexOf(node) === 0 || isBreak(start - 2)) &&
 		isBreak(end)
 	);
 }
@@ -1007,7 +1085,9 @@ function renderReferenceReading(
 	// Markup that the reference reading of the whole block doesn’t read as raw
 	// HTML, as inside a code span that crosses the construct, stays text
 	const text =
-		reading.isInline && state.blockHTML && !hasHTMLWithin(node, state)
+		reading.isInline &&
+		state.blockHTML &&
+		!hasHTMLWithin(node, state.blockHTML)
 			? escapeUnescaped(opened, /</g)
 			: opened;
 	const root = pluginMarkdown.parsers[parserName].parse(text, {
@@ -1140,7 +1220,7 @@ function readInlineSyntax(
 		originalText: parsed,
 	} as ParserOptions) as AST.RootNode;
 	const toSource = (offset: number | undefined): number | undefined =>
-		sliced.offsets[insertions[offset ?? -1] ?? -1];
+		sliced.offsets[insertions[offset!]!];
 
 	return {
 		prettierHTML: findRawHTML(block).map(
@@ -1149,9 +1229,7 @@ function readInlineSyntax(
 		),
 		readings: findInlineReadings(block),
 		referenceHTML: findRawHTML(root)
-			.filter(
-				({ position }) => (position?.start.offset ?? 0) < text.length
-			)
+			.filter(({ position }) => position!.start.offset! < text.length)
 			.map(
 				({ position }) =>
 					`${toSource(position?.start.offset)}:${toSource(position?.end.offset)}`
@@ -1170,7 +1248,7 @@ function reportCrossingSyntax(
 	readings: ReadonlyArray<AST.Node>,
 	state: RenderState
 ): never {
-	const source = state.options.source ?? '';
+	const source = state.options.source!;
 	const construct = readings.find(({ position }) => {
 		const text = source.slice(position?.start.offset, position?.end.offset);
 
@@ -1190,11 +1268,14 @@ function reportCrossingSyntax(
  * Checks whether the reference reading of the current block finds raw HTML
  * within a construct.
  */
-function hasHTMLWithin(node: AST.Node, state: RenderState): boolean {
-	const start = node.position?.start.offset ?? 0;
-	const end = node.position?.end.offset ?? 0;
+function hasHTMLWithin(
+	node: AST.Node,
+	blockHTML: ReadonlySet<string>
+): boolean {
+	const start = node.position!.start.offset!;
+	const end = node.position!.end.offset!;
 
-	return [...(state.blockHTML ?? [])].some((range) => {
+	return [...blockHTML].some((range) => {
 		const [htmlStart = 0, htmlEnd = 0] = range.split(':').map(Number);
 
 		return htmlStart < end && start < htmlEnd;
@@ -1276,10 +1357,595 @@ function findRawHTML(node: AST.Node): AST.HTMLNode[] {
  */
 function findInlineReadings(node: AST.Node): AST.Node[] {
 	return (node.children ?? []).flatMap((child) =>
-		READINGS[child.type ?? '']?.isInline
-			? [child]
-			: findInlineReadings(child)
+		READINGS[child.type!]?.isInline ? [child] : findInlineReadings(child)
 	);
+}
+
+/**
+ * Finds the paragraphs, headings, and tables with raw HTML syntax in their
+ * source, apart from tables that both readings recognize. A block qualifies
+ * with the syntax of a raw HTML token, or with a line that starts an HTML block
+ * after the container prefixes present on it and its indentation. Each check
+ * records the block’s first content line after the first with the syntax of a
+ * delimiter row.
+ *
+ * A paragraph or setext heading also qualifies for the wrapping checks alone
+ * when a text word after its first would open an HTML block that can interrupt
+ * a paragraph at the start of a line.
+ */
+function findDelimiterRowChecks(
+	root: AST.Node,
+	source: string
+): DelimiterRowCheck[] {
+	const checks: DelimiterRowCheck[] = [];
+	const bullets = new Map<AST.Node, ReadonlyMap<AST.Node, string>>();
+
+	visitBlocks(root, [], [], (block, parents, index, containers) => {
+		const parent = parents.at(-1)!;
+		const start = block.position?.start.offset;
+		const end = block.position?.end.offset;
+
+		// Raw HTML syntax, HTML block starts, and the words that open them all
+		// begin with `<`
+		if (
+			start === undefined ||
+			end === undefined ||
+			!source.slice(start, end).includes('<')
+		) {
+			return;
+		}
+
+		const lines = readBlockLines(source, block, containers);
+		const contents = lines.map(({ content }) => content);
+		// A setext heading’s underline is outside its content. Prettier keeps
+		// each ATX heading and table row on one line, so only paragraphs and
+		// setext headings have words to wrap
+		const isSetextHeading = block.type === 'heading' && lines.length > 1;
+		const contentLines = isSetextHeading ? lines.slice(0, -1) : lines;
+		const isWrapped = block.type === 'paragraph' || isSetextHeading;
+		// A task list item’s checkbox precedes the item’s first block on its
+		// line, though Prettier’s Markdown parser can start the block at the
+		// checkbox
+		const isTaskStart =
+			index === 0 &&
+			typeof (parent as { checked?: unknown }).checked === 'boolean';
+		const hasHTMLSyntax =
+			containsRawHTML(source.slice(start, end)) ||
+			containsRawHTML(contents.join('\n')) ||
+			contents.some(
+				(content, lineIndex) =>
+					(lineIndex > 0 || !isTaskStart) && startsHTMLBlock(content)
+			);
+
+		// Without HTML syntax, only a word that opens an HTML block when
+		// wrapping moves it to the start of a line qualifies a block
+		if (!hasHTMLSyntax && !isWrapped) {
+			return;
+		}
+
+		if (
+			block.type === 'table' &&
+			isRecognizedTable(
+				lines,
+				isBlockStart(parent, index, source, start, containers),
+				source,
+				containers
+			)
+		) {
+			return;
+		}
+
+		const line = hasHTMLSyntax
+			? contentLines
+					.slice(1)
+					.find(({ content }) => hasDelimiterRowSyntax(content))
+			: undefined;
+
+		checks.push({
+			block,
+			findWrapHazards() {
+				if (!isWrapped) {
+					return undefined;
+				}
+
+				const words = readWrappableWords(
+					contentLines,
+					findTextNodes(block)
+				);
+
+				if (
+					!hasHTMLSyntax &&
+					!words.some(
+						({ isText, value }, wordIndex) =>
+							wordIndex > 0 &&
+							isText &&
+							canInterruptParagraph(value)
+					)
+				) {
+					return undefined;
+				}
+
+				const definition = findPossibleDefinition(
+					contentLines,
+					isTaskStart &&
+						!source
+							.slice(parent.position!.start.offset, start)
+							.includes('[')
+				);
+				const word = findWrappableWord(
+					words,
+					findPrintedBullet(block, parents, bullets)
+				);
+
+				return {
+					definition:
+						definition === undefined
+							? undefined
+							: toPoint(source, definition),
+					word:
+						word === undefined ? undefined : toPoint(source, word),
+				};
+			},
+			line: line && toPoint(source, line.offset),
+		});
+	});
+
+	return checks;
+}
+
+/**
+ * Returns the paragraphs, headings, and tables with raw HTML syntax in a
+ * document context, apart from tables that both readings recognize, in
+ * document order. Paragraphs and setext headings with `<` but without that
+ * syntax have checks for the words that could open an HTML block.
+ */
+export function getDelimiterRowChecks(
+	context: AST.DocumentContext
+): ReadonlyArray<DelimiterRowCheck> {
+	return delimiterRowChecks.get(context) ?? [];
+}
+
+/**
+ * Checks whether a word could wrap onto a line of its own as a table delimiter
+ * row or a setext underline: a run of equals signs, or a run of pipes, colons,
+ * and hyphens with a pipe or a hyphen. A lone hyphen doesn’t count here, as in
+ * the middle of a line between spaces or tabs, where Prettier keeps it with the
+ * word before it. Whether a lone hyphen counts elsewhere depends on its
+ * position.
+ */
+export function isWrappableDelimiterWord(word: string): boolean {
+	return (
+		/^=+$/.test(word) ||
+		(/^[-:|]+$/.test(word) && /[-|]/.test(word) && word !== '-')
+	);
+}
+
+/**
+ * Finds the source offset of the first word in a block that Prettier could
+ * move to the start of a line, where it could open another Markdown block.
+ * Only spaces, tabs, line feeds, vertical tabs, and form feeds separate words,
+ * and a word counts only where Prettier’s Markdown parser reads text. Prettier
+ * wraps an inline link, a code span, an HTML token, or other inline syntax as
+ * a unit.
+ *
+ * Even as the block’s first word, a word made entirely of one repeated marker
+ * can start a thematic break with the words after it, and a word can open a
+ * code fence. Other words count after the block’s first: a run of equals
+ * signs, a run of pipes, colons, and hyphens with a pipe or a hyphen, and the
+ * start of an HTML block that can interrupt a paragraph. A lone hyphen counts
+ * as the first word of a later line, where Prettier can wrap right after it. In
+ * the middle of a line, it counts unless only spaces or tabs separate it from
+ * the word before it and a space, a tab, or the end of the line follows it.
+ */
+function findWrappableWord(
+	words: ReadonlyArray<WrappableWord>,
+	bullet: string | undefined
+): number | undefined {
+	return words.find(
+		(word, index) =>
+			startsThematicBreak(
+				words,
+				index,
+				index === 0 ? bullet : undefined
+			) ||
+			(word.isText && FENCE_WORD_PATTERN.test(word.value)) ||
+			(index > 0 &&
+				word.isText &&
+				(isWrappableDelimiterWord(word.value) ||
+					(word.value === '-' && !word.isKeptHyphen) ||
+					canInterruptParagraph(word.value)))
+	)?.offset;
+}
+
+/**
+ * Reads the words of a block’s content lines in source order. Only spaces,
+ * tabs, line feeds, vertical tabs, and form feeds separate words. The text
+ * nodes are in source order too, so one pass over both finds the words that
+ * start inside text.
+ */
+function readWrappableWords(
+	lines: ReadonlyArray<BlockLine>,
+	texts: ReadonlyArray<AST.Node>
+): WrappableWord[] {
+	// A text node without both source offsets has no range to search
+	const ranges = texts.flatMap(({ position }) =>
+		position?.start.offset === undefined ||
+		position.end.offset === undefined
+			? []
+			: [{ end: position.end.offset, start: position.start.offset }]
+	);
+	const words: WrappableWord[] = [];
+	let range = 0;
+	let trailing: string | undefined;
+
+	for (const { content, offset } of lines) {
+		let previousEnd: number | undefined;
+
+		for (const { 0: value, index } of content.matchAll(/[^\t\n\v\f ]+/g)) {
+			const wordOffset = offset + index;
+
+			while (range < ranges.length && ranges[range]!.end <= wordOffset) {
+				range += 1;
+			}
+
+			// Only spaces or tabs separate the word from the one before it
+			const isSpaced =
+				previousEnd !== undefined &&
+				/^[\t ]+$/.test(content.slice(previousEnd, index));
+
+			words.push({
+				isJoined:
+					previousEnd === undefined
+						? trailing !== undefined &&
+							index === 0 &&
+							endsInSoftBreak(trailing)
+						: isSpaced,
+				isKeptHyphen:
+					value === '-' &&
+					isSpaced &&
+					/^[\t ]?$/.test(content.slice(index + 1, index + 2)),
+				isLineStart: previousEnd === undefined,
+				isText:
+					range < ranges.length && ranges[range]!.start <= wordOffset,
+				offset: wordOffset,
+				value,
+			});
+			previousEnd = index + value.length;
+		}
+
+		trailing = content.slice(previousEnd);
+	}
+
+	return words;
+}
+
+/**
+ * Finds the source offset of a possible link reference definition at the start
+ * of a block, which a line break after its destination could complete. The
+ * block begins with `[`, after a task list checkbox that the block includes,
+ * and the next unescaped bracket is `]` followed by `:`. The label between
+ * them has a character other than a space, a tab, or a line ending, and can
+ * span lines. Only the source counts, whatever Prettier reads.
+ */
+function findPossibleDefinition(
+	lines: ReadonlyArray<BlockLine>,
+	hasCheckbox: boolean
+): number | undefined {
+	const content = lines.map((line) => line.content).join('\n');
+	const rest = hasCheckbox
+		? content.replace(/^\[[\t xX]\][\t ]+/, '')
+		: content;
+	const label = /^\[((?:\\[\s\S]|[^[\\\]])*)\]:/.exec(rest)?.[1];
+
+	return label !== undefined && /[^\t\n ]/.test(label)
+		? lines[0]!.offset + content.length - rest.length
+		: undefined;
+}
+
+/**
+ * Checks whether a word made entirely of one repeated asterisk, underscore, or
+ * hyphen starts a group of three markers. The group continues through the text
+ * words after it that have the same marker, as long as only spaces, tabs, or
+ * soft line breaks separate them. Prettier can start a line with an
+ * underscore, but not with a lone asterisk or hyphen in the middle of a line.
+ * A list item’s bullet counts toward the markers of its first word.
+ */
+function startsThematicBreak(
+	words: ReadonlyArray<WrappableWord>,
+	index: number,
+	bullet: string | undefined
+): boolean {
+	const { isLineStart, value } = words[index]!;
+	const marker = /^([*_-])\1*$/.exec(value)?.[1];
+
+	if (!marker || !(marker === '_' || value.length > 1 || isLineStart)) {
+		return false;
+	}
+
+	let count = bullet === marker ? 1 : 0;
+
+	for (
+		let next = index;
+		next < words.length &&
+		(next === index || words[next]!.isJoined) &&
+		words[next]!.value === marker.repeat(words[next]!.value.length) &&
+		words[next]!.isText;
+		next += 1
+	) {
+		count += words[next]!.value.length;
+	}
+
+	return count >= 3;
+}
+
+/**
+ * Returns the bullet that Prettier prints before a block that starts an item
+ * of an unordered list, with only spaces between them. A task list item’s
+ * checkbox comes between the bullet and the block. The bullets of a parent’s
+ * lists are read once and kept for its other lists.
+ */
+function findPrintedBullet(
+	block: AST.Node,
+	parents: ReadonlyArray<AST.Node>,
+	bullets: Map<AST.Node, ReadonlyMap<AST.Node, string>>
+): string | undefined {
+	const [listParent, list, item] = parents.slice(-3);
+
+	if (
+		item?.type !== 'listItem' ||
+		item.children![0] !== block ||
+		(list as { ordered?: boolean }).ordered === true ||
+		typeof (item as { checked?: unknown }).checked === 'boolean'
+	) {
+		return undefined;
+	}
+
+	const listBullets =
+		bullets.get(listParent!) ?? readPrintedBullets(listParent!);
+
+	bullets.set(listParent!, listBullets);
+
+	return listBullets.get(list!);
+}
+
+/**
+ * Reads the bullets that Prettier prints for the unordered lists among a
+ * node’s children. Prettier alternates `-` and `*` between adjacent lists.
+ */
+function readPrintedBullets(parent: AST.Node): Map<AST.Node, string> {
+	const bullets = new Map<AST.Node, string>();
+	let index = -1;
+
+	for (const child of parent.children!) {
+		index =
+			child.type === 'list' && !(child as { ordered?: boolean }).ordered
+				? index + 1
+				: -1;
+
+		if (index >= 0) {
+			bullets.set(child, index % 2 === 0 ? '-' : '*');
+		}
+	}
+
+	return bullets;
+}
+
+/**
+ * Checks whether the text after a line’s last word ends the line with a soft
+ * line break, after only spaces or tabs. Two spaces or more make a hard line
+ * break.
+ */
+function endsInSoftBreak(trailing: string): boolean {
+	return /^[\t ]*$/.test(trailing) && !trailing.endsWith('  ');
+}
+
+/**
+ * Finds the text in a node that Prettier’s Markdown parser reads and that
+ * Prettier can wrap, in source order, including the sentences that Prettier’s
+ * printer preprocessing makes of it. Prettier keeps an inline link’s text
+ * together.
+ */
+export function findTextNodes(node: AST.Node): AST.Node[] {
+	return (node.children ?? []).flatMap((child) => {
+		if (child.type === 'text' || child.type === 'sentence') {
+			return [child];
+		}
+
+		return child.type === 'link' ? [] : findTextNodes(child);
+	});
+}
+
+/**
+ * Calls a function for each paragraph, heading, and table in a syntax tree,
+ * with the nodes that contain it, outermost first, its index in its parent,
+ * and the block quotes and list items around it.
+ */
+function visitBlocks(
+	node: AST.Node,
+	parents: ReadonlyArray<AST.Node>,
+	containers: ReadonlyArray<AST.Node>,
+	visit: (
+		block: AST.Node,
+		parents: ReadonlyArray<AST.Node>,
+		index: number,
+		containers: ReadonlyArray<AST.Node>
+	) => void
+): void {
+	const path = [...parents, node];
+
+	for (const [index, child] of (node.children ?? []).entries()) {
+		if (SOURCE_BLOCK_TYPES.has(child.type)) {
+			visit(child, path, index, containers);
+		}
+
+		visitBlocks(
+			child,
+			path,
+			child.type === 'blockquote' || child.type === 'listItem'
+				? [...containers, child]
+				: containers,
+			visit
+		);
+	}
+}
+
+/**
+ * Checks whether a block starts its document, block quote, or list item, or
+ * follows a line with only the enclosing container prefixes and spaces or
+ * tabs, or a line that ends the block before it in the same container.
+ */
+function isBlockStart(
+	parent: AST.Node,
+	index: number,
+	source: string,
+	start: number,
+	containers: ReadonlyArray<AST.Node>
+): boolean {
+	const lineStart = source.lastIndexOf('\n', start - 1) + 1;
+	const previousLineStart = source.lastIndexOf('\n', lineStart - 2) + 1;
+
+	return (
+		(index === 0 && isBlockContainer(parent)) ||
+		measureLineIndentation(source, previousLineStart, containers).isBlank ||
+		(index > 0 &&
+			endsOnLine(
+				parent.children![index - 1]!,
+				previousLineStart,
+				source,
+				containers
+			))
+	);
+}
+
+/**
+ * Checks whether a block ends on a line with the GFM syntax of its ending, so
+ * the next line starts another block in both readings. The block is an ATX
+ * heading, a thematic break, fenced code with a closing fence, or an HTML block
+ * whose end condition that line meets for the first time. A setext heading’s
+ * last line is its underline, which doesn’t count, and neither does the end of
+ * an HTML block that continues until a blank line. A later line needs all its
+ * container prefixes, and a closing fence up to three columns of indentation.
+ * Prettier’s Markdown parser reads a heading or thematic break only with its
+ * container prefixes and that indentation.
+ */
+function endsOnLine(
+	block: AST.Node,
+	lineStart: number,
+	source: string,
+	containers: ReadonlyArray<AST.Node>
+): boolean {
+	const lines = readBlockLines(source, block, containers);
+	const first = lines[0]!.content;
+	const last = lines.at(-1)!;
+	const { indentation, isLazy } = measureLineIndentation(
+		source,
+		lineStart,
+		containers
+	);
+	const opening =
+		block.type === 'code' ? FENCE_OPENING_PATTERN.exec(first) : null;
+	const fence = opening?.[1] ?? opening?.[2];
+	const closing = /^(?:`+|~+)(?=[\t ]*$)/.exec(last.content)?.[0];
+	const end = block.type === 'html' ? findHTMLBlockEnd(first) : undefined;
+
+	return (
+		last.offset >= lineStart &&
+		((block.type === 'heading' &&
+			/^#{1,6}(?:[\t ]|$)/.test(last.content)) ||
+			(block.type === 'thematicBreak' &&
+				/^(?:(?:\*[\t ]*){3,}|(?:-[\t ]*){3,}|(?:_[\t ]*){3,})$/.test(
+					last.content
+				)) ||
+			(fence !== undefined &&
+				lines.length > 1 &&
+				!isLazy &&
+				indentation < 4 &&
+				closing !== undefined &&
+				closing.startsWith(fence[0]!) &&
+				closing.length >= fence.length) ||
+			(end !== undefined &&
+				(lines.length === 1 || !isLazy) &&
+				lines.findIndex(({ content }) => end.test(content)) ===
+					lines.length - 1))
+	);
+}
+
+/**
+ * Checks whether a table that Prettier’s Markdown parser recognizes is one that
+ * the reference renderer recognizes too. Its header has to start a block, and
+ * its delimiter row has to have all its container prefixes, at most three
+ * columns of indentation, and as many cells as the header, at least one.
+ */
+function isRecognizedTable(
+	lines: ReadonlyArray<BlockLine>,
+	startsBlock: boolean,
+	source: string,
+	containers: ReadonlyArray<AST.Node>
+): boolean {
+	const [header, delimiter] = lines as [BlockLine, BlockLine];
+	const cells = countTableCells(header.content);
+	const { indentation, isLazy } = measureLineIndentation(
+		source,
+		source.lastIndexOf('\n', delimiter.offset - 1) + 1,
+		containers
+	);
+
+	return (
+		startsBlock &&
+		!isLazy &&
+		indentation < 4 &&
+		hasDelimiterRowSyntax(delimiter.content) &&
+		cells > 0 &&
+		cells === countTableCells(delimiter.content)
+	);
+}
+
+/**
+ * Checks whether a line, after its block quote and list item prefixes, has the
+ * syntax of a table delimiter row at any indentation. A setext heading’s
+ * underline can have that syntax too, so a check of a heading’s content leaves
+ * the underline out.
+ */
+export function hasDelimiterRowSyntax(line: string): boolean {
+	return DELIMITER_ROW_PATTERN.test(line.replace(/^[\t ]+/, ''));
+}
+
+/**
+ * Reads a block’s lines without the block quote and list item prefixes present
+ * on them or their leading spaces and tabs. The block needs source positions.
+ */
+function readBlockLines(
+	source: string,
+	block: AST.Node,
+	containers: ReadonlyArray<AST.Node>
+): BlockLine[] {
+	const sliced = sliceMarkdownSource(source, block, containers)!;
+	let lineStart = 0;
+
+	return sliced.text.split('\n').map((text) => {
+		const content = text.replace(/^[\t ]+/, '');
+		const offset =
+			sliced.offsets[lineStart + text.length - content.length]!;
+		lineStart += text.length + 1;
+
+		return { content, offset };
+	});
+}
+
+/**
+ * Counts the cells of a table row, after its indentation. An unescaped pipe at
+ * the start, or at the end before cell padding, is an optional outer pipe.
+ * Other unescaped pipes separate cells, including empty ones. A pipe right
+ * after a backslash stays in its cell, even after a run of backslashes.
+ */
+function countTableCells(row: string): number {
+	const cells = row.replace(/^\|[\t\v\f ]*/, '').split(/(?<!\\)\|/);
+
+	if (/^[\t\v\f ]*$/.test(cells.at(-1)!)) {
+		cells.pop();
+	}
+
+	return cells.length;
 }
 
 /**
@@ -1304,7 +1970,7 @@ export function leavesFenceOpenBeforeHTML(
 ): boolean {
 	const end = node.position?.end.offset;
 
-	if (!FENCE_READING_TYPES.has(node.type ?? '') || end === undefined) {
+	if (!FENCE_READING_TYPES.has(node.type!) || end === undefined) {
 		return false;
 	}
 
@@ -1339,7 +2005,7 @@ export function leavesFenceOpenBeforeHTML(
  * whether that line opens a fence.
  */
 export function getRestOfLine(source: string, node: AST.Node): string {
-	const end = node.position?.end.offset ?? source.length;
+	const end = node.position!.end.offset!;
 	const lineEnd = source.indexOf('\n', end);
 
 	return source.slice(end, lineEnd === -1 ? source.length : lineEnd);
@@ -1356,7 +2022,7 @@ function escapeFenceOpening(text: string): string {
 		return text;
 	}
 
-	const index = text.indexOf(opening[1] ?? opening[2]!, lineStart);
+	const index = lineStart + opening[0].search(/[`~]/);
 
 	return `${text.slice(0, index)}\\${text.slice(index)}`;
 }
@@ -1417,12 +2083,7 @@ function reachesIntoFence(
  * tags.
  */
 function startsReferenceBlock(html: AST.HTMLNode, text: string): boolean {
-	const offset = html.position?.start.offset;
-
-	if (offset === undefined) {
-		return false;
-	}
-
+	const offset = html.position!.start.offset!;
 	const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
 	const lineEnd = text.indexOf('\n', offset);
 
@@ -1483,17 +2144,12 @@ function relocate(
 	toSourceOffset: (offset: number) => number,
 	source: string
 ): void {
-	const { position } = node;
+	const { end, start } = node.position!;
 
-	if (
-		position?.start.offset !== undefined &&
-		position.end.offset !== undefined
-	) {
-		node.position = {
-			end: toPoint(source, toSourceOffset(position.end.offset)),
-			start: toPoint(source, toSourceOffset(position.start.offset)),
-		};
-	}
+	node.position = {
+		end: toPoint(source, toSourceOffset(end.offset!)),
+		start: toPoint(source, toSourceOffset(start.offset!)),
+	};
 
 	for (const child of node.children ?? []) {
 		relocate(child, toSourceOffset, source);
@@ -1608,9 +2264,14 @@ function collectDefinitionSources(
 			// and escaped carets keep it from reading footnotes
 			const text = neutralizeInlineSyntax(
 				node.type === 'frontMatter'
-					? `\n${sliceMarkdownSource(source, node, containers)?.text ?? ''}`
+					? `\n${
+							/* v8 ignore next -- @preserve */
+							sliceMarkdownSource(source, node, containers)
+								?.text ?? ''
+						}`
 					: readParagraphLines(
 							source,
+							/* v8 ignore next -- @preserve */
 							node.position?.start.offset ?? 0
 						).join('\n')
 			);

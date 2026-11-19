@@ -11,6 +11,7 @@ import {
 	startsHTMLBlock,
 } from '../is-html-block-sequence/index.ts';
 import isVoidTag from '../is-void-tag/index.ts';
+import { hasDelimiterRowSyntax } from '../render-document-context/index.ts';
 import { reportUnsafeLayout } from '../report-error/index.ts';
 import sliceMarkdownSource from '../slice-markdown-source/index.ts';
 
@@ -23,6 +24,16 @@ type Measurement = {
 	prefixWidth: number;
 	// The character that stands in for spaces the Markdown printer can’t break
 	unbreakableSpace: string;
+};
+
+// A paragraph as Prettier’s Markdown printer prints it
+type PrintedParagraph = {
+	// Whether the paragraph no longer reads as one paragraph once Prettier
+	// prints it, where measuring it outside its container can show that
+	changesReading: boolean;
+	// The layout if the printed paragraph reads as one paragraph with the same
+	// HTML
+	measurement: Measurement | undefined;
 };
 
 type TagPosition = {
@@ -44,6 +55,11 @@ const MARKDOWN_STRUCTURE_PATTERN =
 // Maximum rounds of paragraph layout before reporting that the tags’ layouts
 // haven’t stabilized
 const MAX_LAYOUT_ROUNDS = 8;
+
+// Text that goes before a paragraph’s measurement: nothing, then a combining
+// mark that Prettier measures as zero columns wide, which keeps the first line
+// from starting other Markdown structure
+const MEASUREMENT_PREFIXES = ['', '\u0301'];
 
 const OPENING_TAG_PATTERN = /^<([a-z][a-z0-9-]*)(?=[\t\n\f\r />])/i;
 
@@ -123,8 +139,10 @@ export default async function formatInlineHTML(
  * one-line forms. The first round lays out every tag from one measurement of
  * the paragraph. Since a tag’s position depends on the tags before it, later
  * rounds lay out one tag at a time and measure again after each change. A tag
- * keeps its one-line form if its layout would start Markdown structure or
- * Prettier moves it.
+ * keeps its one-line form if its layout would start Markdown structure, as when
+ * the paragraph no longer reparses as one paragraph, or if Prettier moves it.
+ * Formatting reports an error if the paragraph reads as one paragraph on its
+ * own but not once Prettier prints it.
  */
 async function layOutParagraph(
 	fragments: ReadonlyArray<AST.Fragment>,
@@ -140,11 +158,12 @@ async function layOutParagraph(
 	);
 	const layouts = new Map<string, string | undefined>();
 	let changedTag: AST.Fragment | undefined;
+	let printed = await measureParagraph(layout, values, options);
 
 	for (let round = 0; round < MAX_LAYOUT_ROUNDS; round += 1) {
 		const updates = new Map<AST.HTMLNode, string>();
 		const isSequential = round > 0;
-		let measurement = await measureParagraph(layout, values, options);
+		const roundPrinted = printed;
 
 		changedTag = undefined;
 
@@ -152,7 +171,7 @@ async function layOutParagraph(
 			const position = findTagPosition(
 				fragment,
 				layout,
-				measurement,
+				printed.measurement,
 				options
 			);
 			const key =
@@ -173,91 +192,228 @@ async function layOutParagraph(
 
 			const value =
 				(key && layouts.get(key)) ?? singleLines.get(fragment.node)!;
+			const previousValue = values.get(fragment.node)!;
 
-			if (value === values.get(fragment.node)) {
+			if (value === previousValue) {
 				continue;
 			}
 
 			changedTag = fragment;
 
-			if (isSequential) {
-				values.set(fragment.node, value);
-				measurement = await measureParagraph(layout, values, options);
-			} else {
+			if (!isSequential) {
 				updates.set(fragment.node, value);
+				continue;
+			}
+
+			const previousPrinted = printed;
+
+			values.set(fragment.node, value);
+			printed = await measureParagraph(layout, values, options);
+
+			// A layout that keeps the paragraph from reading as one paragraph
+			// would start Markdown structure
+			if (previousPrinted.measurement && !printed.measurement) {
+				layouts.set(key!, undefined);
+				values.set(fragment.node, previousValue);
+				printed = previousPrinted;
 			}
 		}
 
 		if (!changedTag) {
-			return;
+			break;
 		}
 
-		for (const [node, value] of updates) {
-			values.set(node, value);
+		if (!isSequential) {
+			for (const [node, value] of updates) {
+				values.set(node, value);
+			}
+
+			printed = await measureParagraph(layout, values, options);
+
+			// Later rounds lay out one tag at a time to find any layout that starts
+			// Markdown structure
+			if (!printed.measurement) {
+				for (const node of updates.keys()) {
+					values.set(node, singleLines.get(node)!);
+				}
+
+				printed = roundPrinted;
+			}
 		}
 	}
 
-	reportUnsafeLayout({
-		filepath: options.filepath,
-		position: changedTag?.node.position?.start,
-		reason: 'Formatting couldn’t find a stable layout for this paragraph’s HTML tags',
-	});
+	/* v8 ignore next -- @preserve */
+	if (changedTag) {
+		reportUnsafeLayout({
+			filepath: options.filepath,
+			position: changedTag.node.position?.start,
+			reason: 'Formatting couldn’t find a stable layout for this paragraph’s HTML tags',
+		});
+	}
+
+	if (printed.changesReading) {
+		reportUnsafeLayout({
+			filepath: options.filepath,
+			position: layout.paragraph.position?.start,
+			reason: 'After formatting, this paragraph’s lines would no longer read as one paragraph, which would change the context of its HTML',
+		});
+	}
 }
 
 /**
  * Formats a paragraph with Prettier’s Markdown printer, using the current
- * values of its HTML, and reparses the result to locate that HTML. Where the
- * paragraph’s text would start other Markdown structure on its own, such as an
- * HTML block or a heading after a task item’s checkbox, a combining mark that
- * Prettier measures as zero columns wide goes before it. Returns `undefined` if
- * the result doesn’t reparse as one paragraph with the same number of HTML
+ * values of its HTML, and reparses the result to locate that HTML. Prettier
+ * reads the paragraph from its source, as it does in the document, and prints
+ * the current values in place of the source HTML. Where the paragraph’s text
+ * would start other Markdown structure on its own, such as an HTML block or a
+ * heading after a task item’s checkbox, a combining mark that Prettier
+ * measures as zero columns wide goes before it. The measurement is `undefined`
+ * if neither result reparses as one paragraph with the same number of HTML
  * nodes.
  */
 async function measureParagraph(
 	layout: AST.InlineLayout,
 	values: ReadonlyMap<AST.HTMLNode, string>,
 	options: ParserOptions
-): Promise<Measurement | undefined> {
+): Promise<PrintedParagraph> {
 	const htmlNodes = findHTMLNodes(layout.paragraph);
 	const paragraph = buildParagraphText(layout, htmlNodes, values, options);
 
 	if (paragraph === undefined) {
-		return undefined;
+		return {
+			changesReading: false,
+			measurement: undefined,
+		};
 	}
 
 	const { text, unbreakableSpace } = paragraph;
 
-	for (const prefix of ['', '\u0301']) {
-		// Other plugins’ hooks don’t run for this measurement
-		const formatted = await format(`${prefix}${text}`, {
-			endOfLine: 'lf',
-			parser: 'markdown',
-			plugins: [pluginMarkdown],
-			printWidth: Math.max(options.printWidth - layout.contentEdge, 1),
-			proseWrap: options.proseWrap,
-		});
-		const root = (await pluginMarkdown.parsers.markdown.parse(
-			formatted,
-			{} as ParserOptions
-		)) as AST.Node;
-		const formattedNodes = findHTMLNodes(root);
+	// HTML lines after the first start at the paragraph’s content edge, but
+	// their indentation counts from the container’s content edge
+	const printedValues = htmlNodes.map((node) =>
+		(values.get(node) ?? node.value).replaceAll(
+			'\n',
+			`\n${' '.repeat(layout.contentEdge - layout.containerEdge)}`
+		)
+	);
+	// Prettier indents later lines from the paragraph’s content edge. Four
+	// columns or more past the container’s content edge, those lines can’t start
+	// Markdown structure, though the same lines measured on their own could
+	const areLaterLinesIndented =
+		layout.contentEdge - layout.containerEdge >= 4;
+	let isComparable = false;
 
-		if (
-			root.children?.length === 1 &&
-			root.children[0]!.type === 'paragraph' &&
-			formattedNodes.length === htmlNodes.length
-		) {
+	for (const prefix of MEASUREMENT_PREFIXES) {
+		const printed = await printParagraph(
+			`${prefix}${text}`,
+			printedValues,
+			layout,
+			options
+		);
+
+		if (!printed) {
+			continue;
+		}
+
+		const { formatted, root } = printed;
+
+		isComparable = true;
+
+		if (isParagraph(root, htmlNodes.length)) {
 			return {
-				formatted,
-				formattedNodes,
-				htmlNodes,
-				prefixWidth: measureWidth(prefix, options),
-				unbreakableSpace,
+				changesReading: false,
+				measurement: {
+					formatted,
+					formattedNodes: findHTMLNodes(root),
+					htmlNodes,
+					prefixWidth: measureWidth(prefix, options),
+					unbreakableSpace,
+				},
 			};
 		}
 	}
 
-	return undefined;
+	// The source on its own shows how Prettier’s printing reads only if it
+	// contains the same HTML
+	return {
+		changesReading: isComparable && !areLaterLinesIndented,
+		measurement: undefined,
+	};
+}
+
+/**
+ * Prints Markdown with Prettier’s Markdown printer at a paragraph’s width and
+ * reparses the result. Prettier reads the Markdown as written, but prints the
+ * given values in place of its HTML. Other plugins’ hooks don’t run for this
+ * print. Returns `undefined` if the Markdown doesn’t parse with as many HTML
+ * nodes as there are values.
+ */
+async function printParagraph(
+	markdown: string,
+	printedValues: ReadonlyArray<string>,
+	layout: AST.InlineLayout,
+	options: ParserOptions
+): Promise<{ formatted: string; root: AST.Node } | undefined> {
+	let isPrintedWithValues = false;
+
+	const formatted = await format(markdown, {
+		endOfLine: 'lf',
+		parser: 'markdown',
+		plugins: [
+			pluginMarkdown,
+			{
+				parsers: {
+					markdown: {
+						...pluginMarkdown.parsers.markdown,
+						async parse(source, parserOptions) {
+							const root =
+								(await pluginMarkdown.parsers.markdown.parse(
+									source,
+									parserOptions
+								)) as AST.Node;
+							const nodes = findHTMLNodes(root);
+
+							isPrintedWithValues =
+								nodes.length === printedValues.length;
+
+							if (isPrintedWithValues) {
+								for (const [index, node] of nodes.entries()) {
+									node.value = printedValues[index]!;
+								}
+							}
+
+							return root;
+						},
+					},
+				},
+			},
+		],
+		printWidth: Math.max(options.printWidth - layout.contentEdge, 1),
+		proseWrap: options.proseWrap,
+	});
+
+	if (!isPrintedWithValues) {
+		return undefined;
+	}
+
+	const root = (await pluginMarkdown.parsers.markdown.parse(
+		formatted,
+		{} as ParserOptions
+	)) as AST.Node;
+
+	return { formatted, root };
+}
+
+/**
+ * Checks whether a parsed Markdown root consists of one paragraph with the
+ * given number of HTML nodes.
+ */
+function isParagraph(root: AST.Node, htmlCount: number): boolean {
+	return (
+		root.children?.length === 1 &&
+		root.children[0]!.type === 'paragraph' &&
+		findHTMLNodes(root).length === htmlCount
+	);
 }
 
 /**
@@ -304,12 +460,8 @@ function findTagPosition(
 	const { formatted, formattedNodes, htmlNodes, prefixWidth } = measurement;
 
 	const index = htmlNodes.indexOf(fragment.node);
-	const start = formattedNodes[index]?.position?.start.offset;
-	const end = formattedNodes[index]?.position?.end.offset;
-
-	if (start === undefined || end === undefined) {
-		return undefined;
-	}
+	const start = formattedNodes[index]!.position!.start.offset!;
+	const end = formattedNodes[index]!.position!.end.offset!;
 
 	const attached = findAttachedContent(
 		formatted,
@@ -324,8 +476,8 @@ function findTagPosition(
 	// A line that continues earlier HTML carries the added indentation
 	const isInHTML = formattedNodes.some(
 		({ position }) =>
-			(position?.start.offset ?? lineStart) < lineStart &&
-			lineStart <= (position?.end.offset ?? 0)
+			position!.start.offset! < lineStart &&
+			lineStart <= position!.end.offset!
 	);
 	const column =
 		measureWidth(formatted.slice(lineStart, start), options) -
@@ -359,12 +511,8 @@ function findAttachedContent(
 	let depth = 0;
 
 	for (const node of laterNodes) {
-		const start = node.position?.start.offset;
-		const nodeEnd = node.position?.end.offset;
-
-		if (start === undefined || nodeEnd === undefined) {
-			break;
-		}
+		const start = node.position!.start.offset!;
+		const nodeEnd = node.position!.end.offset!;
 
 		const [text] = textPattern.exec(formatted.slice(offset, start))!;
 		const isClosingTag = CLOSING_TAG_PATTERN.test(node.value);
@@ -438,10 +586,12 @@ function measureWidth(text: string, options: ParserOptions): number {
 
 /**
  * Returns a paragraph’s Markdown source without container prefixes or leading
- * whitespace, with the current values of its HTML. Separators that can no
- * longer break become placeholders that the Markdown printer can’t break,
- * including whitespace that a leading tag’s current value would join to its
- * line.
+ * whitespace. Separators that can no longer break become placeholders that the
+ * Markdown printer can’t break, including whitespace that a leading tag’s
+ * current value would join to its line. Line breaks outside the HTML can become
+ * spaces, as Prettier prints soft line breaks unless `proseWrap` preserves them.
+ * Without its container, a lazy continuation line could otherwise start Markdown
+ * structure.
  */
 function buildParagraphText(
 	layout: AST.InlineLayout,
@@ -498,16 +648,11 @@ function buildParagraphText(
 			between = between.replace(/[\t\n ]+$/, unbreakableSpace);
 		}
 
-		text += between;
-
-		// HTML lines after the first start at the paragraph’s content edge, but
-		// their indentation counts from the container’s content edge
-		if (node) {
-			text += (values.get(node) ?? node.value).replaceAll(
-				'\n',
-				`\n${' '.repeat(layout.contentEdge - layout.containerEdge)}`
-			);
+		if (options.proseWrap !== 'preserve') {
+			between = joinSoftLineBreaks(between);
 		}
+
+		text += between + sliced.text.slice(start, end);
 
 		offset = end;
 		previous = node;
@@ -522,6 +667,24 @@ function buildParagraphText(
 			.replaceAll(/(?<=\n {0,3})(?==+[\t ]*(?:\n|$))/g, '\\'),
 		unbreakableSpace,
 	};
+}
+
+/**
+ * Replaces soft line breaks in Markdown text with spaces. A hard line break
+ * written as two or more trailing spaces or a backslash stays.
+ */
+function joinSoftLineBreaks(text: string): string {
+	const lines = text.split('\n');
+	let joined = lines[0]!;
+
+	for (const line of lines.slice(1)) {
+		joined = /(?: {2}|(?:^|[^\\])(?:\\\\)*\\)$/.test(joined)
+			? `${joined}\n${line}`
+			: // Prettier joins the lines at spaces and tabs only
+				`${joined.replace(/[\t ]+$/, '')} ${line.replace(/^[\t ]+/, '')}`;
+	}
+
+	return joined;
 }
 
 /**
@@ -579,10 +742,10 @@ async function formatTagAt(
 	);
 	const end = formatted.startsWith(`${prefix}<`)
 		? findTagEnd(formatted, prefix.length)
-		: undefined;
+		: /* v8 ignore next -- @preserve */ undefined;
 	const tag =
 		end === undefined
-			? undefined
+			? /* v8 ignore next -- @preserve */ undefined
 			: keepInParagraph(formatted.slice(prefix.length, end), layout);
 
 	return tag?.replace(`<${probeName}`, `<${tagName}`);
@@ -666,7 +829,9 @@ function findTagLines(formatted: string): number {
 /**
  * Keeps a formatted tag’s lines in its paragraph. A bracket whose line would
  * start Markdown structure rejoins the last attribute line. Returns `undefined`
- * if another line would start Markdown structure.
+ * if another line would start Markdown structure or, at any indentation, would
+ * have the syntax of a table delimiter row, which formatting rejects in a
+ * paragraph with raw HTML.
  */
 function keepInParagraph(
 	tag: string,
@@ -674,7 +839,10 @@ function keepInParagraph(
 ): string | undefined {
 	const lines = tag.split('\n');
 	const unsafeLine = lines.findIndex(
-		(line, index) => index > 0 && startsMarkdownStructure(line, layout)
+		(line, index) =>
+			index > 0 &&
+			(startsMarkdownStructure(line, layout) ||
+				hasDelimiterRowSyntax(line))
 	);
 
 	if (unsafeLine === -1) {
@@ -770,7 +938,7 @@ async function formatTag(
 
 	return formatted.toLowerCase().endsWith(closingTag.toLowerCase())
 		? formatted.slice(0, -closingTag.length).trimEnd()
-		: undefined;
+		: /* v8 ignore next -- @preserve */ undefined;
 }
 
 /**
@@ -792,6 +960,7 @@ export async function formatInlineTagName(
 	const singleLineOptions = getSingleLineOptions(options);
 
 	if (isClosingTag) {
+		/* v8 ignore next -- @preserve */
 		return (
 			CLOSING_TAG_PATTERN.exec(
 				await formatClosingTag(tagName, singleLineOptions, position)
@@ -805,6 +974,7 @@ export async function formatInlineTagName(
 		position
 	);
 
+	/* v8 ignore next -- @preserve */
 	return OPENING_TAG_PATTERN.exec(formatted)?.[1] ?? tagName;
 }
 
@@ -861,7 +1031,7 @@ function keepOffLineStart(
 		return;
 	}
 
-	const siblings = fragment.parent.children ?? [];
+	const siblings = fragment.parent.children!;
 	const previousNode = siblings[siblings.indexOf(fragment.node) - 1];
 	const previousEnd = previousNode?.position?.end.offset;
 	const separatorNode = previousNode && getLastDescendant(previousNode);
@@ -1001,7 +1171,7 @@ function findSeparatorAfter(
 	parent: AST.Node,
 	node: AST.Node
 ): AST.Node | undefined {
-	const siblings = parent.children ?? [];
+	const siblings = parent.children!;
 	const next = siblings[siblings.indexOf(node) + 1];
 
 	return next?.type === 'sentence' ? next.children?.[0] : next;

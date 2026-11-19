@@ -26,7 +26,7 @@ export default async function formatMarkdown(
 	} = omitParserOptions(options);
 	/* oxlint-enable eslint/no-unused-vars */
 	const parserName = options.parser === 'remark' ? 'remark' : 'markdown';
-	const plugins = (options.plugins ?? []).map(withoutOwnHooks) as Plugin[];
+	const plugins = options.plugins.map(withoutOwnHooks) as Plugin[];
 
 	return format(text, {
 		...formattingOptions,

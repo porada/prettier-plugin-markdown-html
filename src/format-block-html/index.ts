@@ -1,6 +1,7 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import * as pluginHTML from 'prettier/plugins/html';
+import * as pluginMarkdown from 'prettier/plugins/markdown';
 import findTagEnd from '../find-tag-end/index.ts';
 import formatHTML from '../format-html/index.ts';
 import isHTMLBlockSequence, {
@@ -12,22 +13,14 @@ import isHTMLBlockSequence, {
 	readTakenInHTML,
 } from '../is-html-block-sequence/index.ts';
 import isRawTextTag from '../is-raw-text-tag/index.ts';
-import { getBlockSource } from '../render-document-context/index.ts';
+import { getBlockSource, READINGS } from '../render-document-context/index.ts';
 import {
 	reportChangedTagSpelling,
 	reportFormatterFailure,
 	reportUnsafeLayout,
 	reportUnsupportedMarkdown,
 } from '../report-error/index.ts';
-
-// A line containing only closing tags, as Prettier prints for elements whose
-// closing tags were omitted
-const CLOSING_TAGS_LINE_PATTERN =
-	/^[\t ]*(?:<\/[a-z][^\s/<>]*[\t ]*>[\t ]*)+$/i;
-
-// A comment that Prettier’s Markdown printer honors as an ignore directive
-export const IGNORE_COMMENT_PATTERN =
-	/^<!--\s*prettier-ignore(?:-(end|start))?\s*-->$/;
+import sliceMarkdownSource from '../slice-markdown-source/index.ts';
 
 // Elements that Prettier’s HTML parser closes when an enclosing element closes
 const CLOSED_BY_PARENT_TAG_NAMES = new Set([
@@ -48,12 +41,29 @@ const CLOSED_BY_PARENT_TAG_NAMES = new Set([
 	'tr',
 ]);
 
+// A line containing only closing tags, as Prettier prints for elements whose
+// closing tags were omitted
+const CLOSING_TAGS_LINE_PATTERN =
+	/^[\t ]*(?:<\/[a-z][^\s/<>]*[\t ]*>[\t ]*)+$/i;
+
+// A comment that Prettier’s Markdown printer honors as an ignore directive
+export const IGNORE_COMMENT_PATTERN =
+	/^<!--\s*prettier-ignore(?:-(end|start))?\s*-->$/;
+
 const TAKEN_IN_CONSEQUENCES: Record<TakenInContent, string> = {
 	'html': 'end partway through an HTML block that follows',
 	'ignore-comment':
 		'include the Prettier ignore comment that follows, preventing Prettier’s Markdown printer from honoring it',
 	'markdown': 'include the Markdown that follows',
 };
+
+// The block quotes and list items around each node of a document, keyed by
+// start offset, for each formatting run’s options
+const containerIndexes = new WeakMap<ParserOptions, Map<number, AST.Node[]>>();
+
+// The footnote definitions in a scope for which the reference profile renders
+// nothing, keyed by the options that formatting the scope uses
+const unrenderedFootnotes = new WeakMap<ParserOptions, ReadonlySet<AST.Node>>();
 
 type HTMLElement = {
 	children?: HTMLElement[];
@@ -138,32 +148,23 @@ export default async function formatBlockHTML(
 	const fragments = scope.children.filter((child) =>
 		isFragment(scope, child)
 	);
-	const brokenFragments = new Set<AST.HTMLNode>();
 
 	checkSourceBlocks(scope, options);
 
-	let layout = await formatSkeleton(
-		scope,
-		marker,
-		brokenFragments,
-		formattingOptions
+	// Every scope in a formatting run shares its options, so the document is
+	// read once
+	unrenderedFootnotes.set(
+		formattingOptions,
+		new Set(
+			scope.children.filter(
+				(child) =>
+					child.type === 'footnoteDefinition' &&
+					isUnrenderedFootnote(child, options)
+			)
+		)
 	);
 
-	for (const node of fragments) {
-		if (needsExpandedLayout(scope, node, layout.values.get(node)!)) {
-			brokenFragments.add(node);
-		}
-	}
-
-	if (brokenFragments.size > 0) {
-		layout = await formatSkeleton(
-			scope,
-			marker,
-			brokenFragments,
-			formattingOptions
-		);
-	}
-
+	const layout = await layOutScope(scope, marker, formattingOptions);
 	const children = [...scope.children];
 	const values = new Map<AST.HTMLNode, string>();
 
@@ -172,26 +173,22 @@ export default async function formatBlockHTML(
 			continue;
 		}
 
-		const joined = rejoinBrackets(joinFirstTag(layout.values.get(node)!));
-
-		// If the fragment starts inside protected content, the block reader
-		// can’t tell where that content ends
 		values.set(
 			node,
-			keepIgnoreCommentWhitespace(
+			await finishFragment(
+				scope,
 				node,
-				scope.protectedStarts.has(node)
-					? joined
-					: alignBlockStarts(joined)
+				layout.values.get(node)!,
+				formattingOptions
 			)
 		);
 	}
 
+	const finalValues = new Map<AST.HTMLNode, string>();
+
 	for (const [node, aligned] of values) {
-		const takenIn = findTakenInContent(scope, node, values);
-		const value = takenIn
-			? endBlockOnLastLine(node, aligned, takenIn, options)
-			: aligned;
+		const value = finishLayout(scope, node, aligned, values, options);
+
 		checkIgnoreComment(scope, node, value, options);
 		checkHTMLBlocks(
 			node,
@@ -199,7 +196,10 @@ export default async function formatBlockHTML(
 			scope.endsOpenBlocks && scope.children.at(-1) === node,
 			options
 		);
+		finalValues.set(node, value);
+	}
 
+	for (const [node, value] of finalValues) {
 		node.value = value;
 		scope.formattedNodes.add(node);
 	}
@@ -228,7 +228,70 @@ export default async function formatBlockHTML(
 
 	separateFromMarkdown(scope, children);
 
+	const separated = [...finalValues.keys()].find((node) =>
+		hasSeparatedDirective(node.value)
+	);
+
+	if (separated) {
+		await checkNextPass(
+			scope,
+			children,
+			separated,
+			marker,
+			formattingOptions
+		);
+	}
+
 	return children;
+}
+
+/**
+ * Formats a scope’s skeleton. Fragments whose first tag would share a line with
+ * content use Prettier’s expanded layout.
+ */
+async function layOutScope(
+	scope: AST.BlockScope,
+	marker: Marker,
+	options: ParserOptions
+): Promise<ScopeLayout> {
+	const brokenFragments = new Set<AST.HTMLNode>();
+	const layout = await formatSkeleton(
+		scope,
+		marker,
+		brokenFragments,
+		options
+	);
+
+	for (const node of scope.children) {
+		if (
+			isFragment(scope, node) &&
+			needsExpandedLayout(scope, node, layout.values.get(node)!)
+		) {
+			brokenFragments.add(node);
+		}
+	}
+
+	return brokenFragments.size > 0
+		? formatSkeleton(scope, marker, brokenFragments, options)
+		: layout;
+}
+
+/**
+ * Ends the HTML block that a fragment’s value leaves open where it would take
+ * in the content after it.
+ */
+function finishLayout(
+	scope: AST.BlockScope,
+	node: AST.HTMLNode,
+	aligned: string,
+	values: ReadonlyMap<AST.HTMLNode, string>,
+	options: ParserOptions
+): string {
+	const takenIn = findTakenInContent(scope, node, values);
+
+	return takenIn
+		? endBlockOnLastLine(node, aligned, takenIn, options)
+		: aligned;
 }
 
 /**
@@ -241,7 +304,7 @@ async function formatSkeleton(
 	brokenFragments: ReadonlySet<AST.HTMLNode>,
 	options: ParserOptions
 ): Promise<ScopeLayout> {
-	const skeleton = buildSkeleton(scope, marker, brokenFragments);
+	const skeleton = buildSkeleton(scope, marker, brokenFragments, options);
 	const {
 		closingTags,
 		contextClosingTags,
@@ -280,6 +343,7 @@ async function formatSkeleton(
 					? findCommentEnd(formatted, offset, part.node.value)
 					: markers[markerIndex]?.start;
 
+			/* v8 ignore next -- @preserve */
 			if (end === undefined) {
 				reportMisplacedMarkdown(scope, options);
 			}
@@ -392,7 +456,7 @@ function findCommentEnd(
 	const start = formatted.indexOf(comment.trim(), offset);
 
 	return start === -1 || /\S/.test(formatted.slice(offset, start))
-		? undefined
+		? /* v8 ignore next -- @preserve */ undefined
 		: start + comment.trim().length;
 }
 
@@ -456,11 +520,9 @@ async function findImplicitClosingTags(
 	 * Returns an element’s name as the skeleton spells it.
 	 */
 	function getSourceName(element: HTMLElement): string {
-		return (
-			/^<([^\s/>]+)/.exec(
-				skeleton.text.slice(element.sourceSpan.start.offset)
-			)?.[1] ?? element.name!
-		);
+		return /^<([^\s/>]+)/.exec(
+			skeleton.text.slice(element.sourceSpan.start.offset)
+		)![1]!;
 	}
 
 	// Elements whose closing tags are already accounted for, so later
@@ -486,12 +548,12 @@ async function findImplicitClosingTags(
 	 * Protection covers the next element and all its descendants.
 	 */
 	function isProtectedByHTMLIgnore(element: HTMLElement): boolean {
-		const siblings = element.parent?.children ?? [];
+		const siblings = element.parent!.children!;
 		const previous = siblings
 			.slice(0, siblings.indexOf(element))
 			.findLast(
 				(sibling) =>
-					sibling.kind !== 'text' || /\S/.test(sibling.value ?? '')
+					sibling.kind !== 'text' || /\S/.test(sibling.value!)
 			);
 
 		return (
@@ -510,7 +572,7 @@ async function findImplicitClosingTags(
 	function findAdjacentIgnoreDirective(
 		element: HTMLElement
 	): HTMLElement | undefined {
-		const siblings = element.parent?.children ?? [];
+		const siblings = element.parent!.children!;
 		const previous = siblings[siblings.indexOf(element) - 1];
 
 		return previous?.kind === 'comment' &&
@@ -552,7 +614,7 @@ async function findImplicitClosingTags(
 				.find(
 					(descendant) =>
 						descendant.name === element.name ||
-						!CLOSED_BY_PARENT_TAG_NAMES.has(descendant.name ?? '')
+						!CLOSED_BY_PARENT_TAG_NAMES.has(descendant.name!)
 				);
 
 			if (blocked) {
@@ -621,7 +683,6 @@ async function findImplicitClosingTags(
 		}
 	}
 
-	const end = parts.at(-1)!;
 	const openAtEnd = findOpenElements(root, skeleton.text.length, true).slice(
 		scope.ancestors.length
 	);
@@ -633,13 +694,13 @@ async function findImplicitClosingTags(
 				element.sourceSpan.start.offset < part.end
 		);
 
-	if (end.kind === 'marker') {
-		closingTags.set(
-			parts.length - 2,
-			(closingTags.get(parts.length - 2) ?? '') +
-				close(openAtEnd.filter((element) => !isContext(element)))
-		);
-	}
+	// The skeleton always ends with a marker, so the elements left open close
+	// before it
+	closingTags.set(
+		parts.length - 2,
+		(closingTags.get(parts.length - 2) ?? '') +
+			close(openAtEnd.filter((element) => !isContext(element)))
+	);
 
 	// Closing tags and omit markers, keyed by insertion offset in the skeleton.
 	// Only marked closing tags and their markers are removed after formatting
@@ -828,7 +889,7 @@ function getDepth(element: HTMLElement): number {
  */
 function findTrailingOpenElements(element: HTMLElement): HTMLElement[] {
 	const lastChild = element.children?.findLast(
-		(child) => child.kind !== 'text' || /\S/.test(child.value ?? '')
+		(child) => child.kind !== 'text' || /\S/.test(child.value!)
 	);
 
 	return lastChild?.kind === 'element' &&
@@ -844,7 +905,7 @@ function findTrailingOpenElements(element: HTMLElement): HTMLElement[] {
  */
 function findContentEnd(element: HTMLElement, text: string): number {
 	const lastChild = element.children?.findLast(
-		(child) => child.kind !== 'text' || /\S/.test(child.value ?? '')
+		(child) => child.kind !== 'text' || /\S/.test(child.value!)
 	);
 	const { offset: start } = element.sourceSpan.start;
 	const end = (lastChild ?? element).sourceSpan.end.offset;
@@ -858,7 +919,7 @@ function findContentEnd(element: HTMLElement, text: string): number {
 function findElements(root: HTMLElement): HTMLElement[] {
 	const elements: HTMLElement[] = [];
 
-	for (const child of root.children ?? []) {
+	for (const child of root.children!) {
 		if (child.kind === 'element') {
 			elements.push(child, ...findElements(child));
 		}
@@ -960,13 +1021,15 @@ function containsOffset(
  * last child, which can lack a closing tag too.
  */
 function findOpenElementEnd(element: HTMLElement): number {
-	const lastChild = element.children?.at(-1);
+	// The skeleton follows every part with another, so an open element always
+	// has a child
+	const lastChild = element.children!.at(-1)!;
 
-	return lastChild?.kind === 'element' &&
+	return lastChild.kind === 'element' &&
 		!lastChild.isVoid &&
 		!lastChild.endSourceSpan
 		? findOpenElementEnd(lastChild)
-		: (lastChild ?? element).sourceSpan.end.offset;
+		: lastChild.sourceSpan.end.offset;
 }
 
 /**
@@ -977,7 +1040,7 @@ function isLastOpenElement(element: HTMLElement): boolean {
 	let current: HTMLElement | undefined = element;
 
 	while (current?.parent) {
-		const siblings: HTMLElement[] = current.parent.children ?? [];
+		const siblings: HTMLElement[] = current.parent.children!;
 
 		if (siblings.at(-1) !== current) {
 			return false;
@@ -1049,9 +1112,11 @@ function renderSkeleton(
 function buildSkeleton(
 	scope: AST.BlockScope,
 	marker: Marker,
-	brokenFragments: ReadonlySet<AST.HTMLNode>
+	brokenFragments: ReadonlySet<AST.HTMLNode>,
+	options: ParserOptions
 ): Skeleton {
 	const parts: SkeletonPart[] = [];
+	const footnotes = unrenderedFootnotes.get(options)!;
 	let text = scope.ancestors.map((name) => `<${name}>`).join('');
 	let contextOpeners: AST.InlineOpener[] = [];
 	let isInProtectedContent = false;
@@ -1162,7 +1227,10 @@ function buildSkeleton(
 			isInProtectedContent = scope.protectedEnds.has(child);
 		} else {
 			addSeparatorAfterIgnored();
-			addMarker(getGeneratedTagName(child, scope) ?? 'comment', false);
+			addMarker(
+				getGeneratedTagName(child, scope, footnotes) ?? 'comment',
+				false
+			);
 		}
 
 		previous = child;
@@ -1180,12 +1248,15 @@ function buildSkeleton(
 }
 
 /**
- * Checks whether HTML consists of one complete comment.
+ * Checks whether HTML consists of one complete comment that Prettier prints as
+ * written. Prettier formats the contents and conditions of conditional
+ * comments, which start with `<!--[if` or `<!--<!`.
  */
 function isComment(html: string): boolean {
 	const comment = html.trim();
 	return (
 		comment.startsWith('<!--') &&
+		!/^<!--(?:\[if|<!)/.test(comment) &&
 		comment.indexOf('-->', 4) === comment.length - 3
 	);
 }
@@ -1219,7 +1290,7 @@ function createMarker(scope: AST.BlockScope): Marker {
 	// value that spans several fragments. Prettier may break a marker’s tags
 	// across lines when the print width is narrow
 	const markerPattern = new RegExp(
-		String.raw`<([a-z][a-z0-9]*)\s+${name}-(\d+)\s*(?:\/\s*)?>(?:\s*<\/\1\s*>)?|<!--${name}-(\d+)-->|(?<![\w-])${name}-text-(\d+)`,
+		String.raw`<([a-z][a-z0-9]*)\s+${name}-(\d+)\s*>(?:\s*<\/\1\s*>)?|<!--${name}-(\d+)-->|(?<![\w-])${name}-text-(\d+)`,
 		'g'
 	);
 	const breakPattern = new RegExp(
@@ -1241,9 +1312,7 @@ function createMarker(scope: AST.BlockScope): Marker {
 				return `${name}-text-${id}`;
 			}
 
-			return form === 'hr'
-				? `<hr ${name}-${id} />`
-				: `<${form} ${name}-${id}></${form}>`;
+			return `<${form} ${name}-${id}></${form}>`;
 		},
 		find(text) {
 			return [...text.matchAll(markerPattern)].map((match) => ({
@@ -1255,6 +1324,7 @@ function createMarker(scope: AST.BlockScope): Marker {
 		insertBreak(html) {
 			const tagEnd = findTagEnd(html, html.search(/\S/));
 
+			/* v8 ignore next -- @preserve */
 			if (tagEnd === undefined) {
 				return html;
 			}
@@ -1278,45 +1348,114 @@ function createMarker(scope: AST.BlockScope): Marker {
 
 /**
  * Selects an element to represent a Markdown block when Prettier formats the
- * surrounding HTML.
+ * surrounding HTML. Prettier’s HTML parser treats the block elements that
+ * Markdown generates alike: each one closes an open `p` element and no other
+ * element, so a `p` element represents them all.
  */
 function getGeneratedTagName(
 	node: AST.Node,
-	scope: AST.BlockScope
+	scope: AST.BlockScope,
+	unrendered: ReadonlySet<AST.Node>
 ): string | undefined {
 	switch (node.type) {
-		case 'blockquote':
-			return 'blockquote';
-
-		case 'code':
-
-		case 'footnoteDefinition':
-			return 'pre';
-
 		case 'definition':
 
 		case 'frontMatter':
 			return undefined;
 
-		case 'heading':
-			return `h${(node as { depth?: number }).depth ?? 1}`;
-
-		case 'list':
-			return (node as { ordered?: boolean }).ordered ? 'ol' : 'ul';
+		case 'footnoteDefinition':
+			return unrendered.has(node) ? undefined : 'p';
 
 		case 'paragraph':
 			// Paragraphs in tight lists render as text without a wrapper
 			return scope.isTight ? 'span' : 'p';
 
-		case 'table':
-			return 'table';
-
-		case 'thematicBreak':
-			return 'hr';
-
 		default:
 			return 'p';
 	}
+}
+
+/**
+ * Checks whether the reference profile renders nothing for a footnote
+ * definition. It reads the source without container prefixes as Markdown with
+ * footnotes disabled, as the document context does. A first paragraph with the
+ * syntax of a link reference definition renders nothing, while other content,
+ * such as indented blocks after a blank line, renders. Without both source
+ * offsets, the definition counts as rendering content.
+ */
+function isUnrenderedFootnote(node: AST.Node, options: ParserOptions): boolean {
+	const start = node.position?.start.offset;
+	const end = node.position?.end.offset;
+
+	if (start === undefined || end === undefined) {
+		return false;
+	}
+
+	const { text: source } = sliceMarkdownSource(
+		options.originalText,
+		node,
+		findContainers(options, start)
+	)!;
+	const text = READINGS.footnoteDefinition!.neutralize(source);
+
+	return parseMarkdown(text).children.every(
+		({ type }) => type === 'definition'
+	);
+}
+
+/**
+ * Parses Markdown with Prettier’s Markdown parser.
+ */
+function parseMarkdown(text: string): AST.RootNode {
+	return pluginMarkdown.parsers.markdown.parse(text, {
+		originalText: text,
+	} as ParserOptions) as AST.RootNode;
+}
+
+/**
+ * Lists the block quotes and list items around the node of a document that
+ * starts at an offset, outermost first. Returns an empty list if no node starts
+ * there. Each formatting run parses its document once, however many nodes are
+ * looked up.
+ */
+function findContainers(options: ParserOptions, offset: number): AST.Node[] {
+	let index = containerIndexes.get(options);
+
+	if (!index) {
+		index = indexContainers(parseMarkdown(options.originalText));
+		containerIndexes.set(options, index);
+	}
+
+	return index.get(offset) ?? [];
+}
+
+/**
+ * Maps each start offset in a syntax tree to the block quotes and list items
+ * around the node that starts there. Only a node and its first descendants can
+ * share a start, and a block quote or list item starts before its first child,
+ * so those nodes have the same containers.
+ */
+function indexContainers(root: AST.Node): Map<number, AST.Node[]> {
+	const index = new Map<number, AST.Node[]>();
+	const pending: Array<{ containers: AST.Node[]; node: AST.Node }> = [
+		{ containers: [], node: root },
+	];
+
+	while (pending.length > 0) {
+		const { containers, node } = pending.pop()!;
+		index.set(node.position!.start.offset!, containers);
+
+		const innerContainers =
+			node.type === 'blockquote' || node.type === 'listItem'
+				? [...containers, node]
+				: containers;
+
+		for (const child of node.children ?? []) {
+			pending.push({ containers: innerContainers, node: child });
+		}
+	}
+
+	return index;
 }
 
 /**
@@ -1635,6 +1774,225 @@ function checkIgnoreComment(
 }
 
 /**
+ * Adjusts a fragment’s formatted value so it keeps reading as HTML blocks. If
+ * the fragment starts inside protected content, the block reader can’t tell
+ * where that content ends.
+ */
+async function finishFragment(
+	scope: AST.BlockScope,
+	node: AST.HTMLNode,
+	formatted: string,
+	options: ParserOptions
+): Promise<string> {
+	const joined = rejoinBrackets(await joinFirstTag(formatted, options));
+
+	return keepIgnoreCommentWhitespace(
+		node,
+		scope.protectedStarts.has(node) ? joined : alignBlockStarts(joined)
+	);
+}
+
+/**
+ * Checks whether a comment is an ignore or attribute ignore directive that
+ * Prettier’s HTML printer honors.
+ */
+function isHTMLIgnoreDirective(comment: string): boolean {
+	const value = comment.slice(4, -3).trim();
+
+	return (
+		value === 'prettier-ignore' ||
+		/^prettier-ignore-attribute(?:\s+.+)?$/s.test(value)
+	);
+}
+
+/**
+ * Lists the comments in HTML, outside preserved content, in source order.
+ */
+function listComments(html: string): MarkupToken[] {
+	return scanMarkup(html).filter(({ kind }) => kind === 'comment');
+}
+
+/**
+ * Gives a block the entry that a map has for a node.
+ */
+function copyEntry<T>(
+	source: ReadonlyMap<AST.HTMLNode, T>,
+	target: Map<AST.HTMLNode, T>,
+	node: AST.HTMLNode,
+	block: AST.HTMLNode
+): void {
+	if (source.has(node)) {
+		target.set(block, source.get(node)!);
+	}
+}
+
+/**
+ * Adds a block to a set that contains a node.
+ */
+function copyMember(
+	source: ReadonlySet<AST.HTMLNode>,
+	target: Set<AST.HTMLNode>,
+	node: AST.HTMLNode,
+	block: AST.HTMLNode
+): void {
+	if (source.has(node)) {
+		target.add(block);
+	}
+}
+
+/**
+ * Checks whether formatting moved HTML that an HTML ignore directive protects
+ * to the start of another HTML block, separating it from the directive.
+ */
+function hasSeparatedDirective(value: string): boolean {
+	const lines = value.split('\n');
+	const comments = listComments(value);
+
+	return findBlockStartLines(value).some((start) => {
+		const end = lines.slice(0, start).join('\n').trimEnd().length;
+		const comment = comments.find((token) => token.end === end);
+
+		return (
+			comment !== undefined &&
+			isHTMLIgnoreDirective(value.slice(comment.start, comment.end))
+		);
+	});
+}
+
+/**
+ * Reports an error when formatting the scope’s result again would change it,
+ * after formatting separated an HTML ignore directive from the HTML it
+ * protects.
+ *
+ * The next pass reads each HTML block of the formatted HTML as a fragment of
+ * its own. A directive then stops protecting the next fragment unless it forms
+ * a complete comment of its own that Prettier’s Markdown printer doesn’t honor.
+ * Prettier’s Markdown printer keeps the HTML block after a standalone
+ * `prettier-ignore` comment as written.
+ */
+async function checkNextPass(
+	scope: AST.BlockScope,
+	children: ReadonlyArray<AST.Node>,
+	separated: AST.HTMLNode,
+	marker: Marker,
+	options: ParserOptions
+): Promise<void> {
+	const blocks = new Map<AST.HTMLNode, AST.HTMLNode[]>();
+	const nextChildren: AST.Node[] = [];
+	const blockFragments = new Set<AST.Node>(scope.blockFragments);
+	const ignoredNodes = new Set(scope.ignoredNodes);
+	const inlineClosingTags = new Map(scope.inlineClosingTags);
+	const inlineOpeners = new Map(scope.inlineOpeners);
+	const protectedEnds = new Set(scope.protectedEnds);
+	const protectedStarts = new Set(scope.protectedStarts);
+	let isIgnoringNext = false;
+
+	for (const child of children) {
+		// Ignored fragments already keep their source, and the next pass
+		// formats other nodes outside the skeleton
+		if (!isHTMLNode(child) || !scope.formattedNodes.has(child)) {
+			isIgnoringNext = false;
+			nextChildren.push(child);
+			continue;
+		}
+
+		const lines = child.value.split('\n');
+		const starts = [0, ...findBlockStartLines(child.value).slice(1)];
+		const childBlocks = starts.map((start, index): AST.HTMLNode => ({
+			position: child.position,
+			type: 'html',
+			value: lines.slice(start, starts[index + 1]).join('\n'),
+		}));
+
+		for (const block of childBlocks) {
+			blockFragments.add(block);
+
+			if (isIgnoringNext) {
+				ignoredNodes.add(block);
+			}
+
+			isIgnoringNext = /^<!--\s*prettier-ignore\s*-->$/.test(block.value);
+		}
+
+		// Context before the fragment applies to its first block, and
+		// protected content at its end to its last block
+		const first = childBlocks[0]!;
+
+		copyEntry(scope.inlineClosingTags, inlineClosingTags, child, first);
+		copyEntry(scope.inlineOpeners, inlineOpeners, child, first);
+		copyMember(scope.protectedStarts, protectedStarts, child, first);
+		copyMember(
+			scope.protectedEnds,
+			protectedEnds,
+			child,
+			childBlocks.at(-1)!
+		);
+
+		blocks.set(child, childBlocks);
+		nextChildren.push(...childBlocks);
+	}
+
+	const next: AST.BlockScope = {
+		...scope,
+		blockFragments,
+		children: nextChildren,
+		formattedNodes: new WeakSet(),
+		ignoredNodes,
+		inlineClosingTags,
+		inlineOpeners,
+		protectedEnds,
+		protectedStarts,
+	};
+	const layout = await layOutScope(next, marker, options);
+	const values = new Map<AST.HTMLNode, string>();
+
+	for (const block of [...blocks.values()].flat()) {
+		if (!ignoredNodes.has(block)) {
+			values.set(
+				block,
+				await finishFragment(
+					next,
+					block,
+					layout.values.get(block)!,
+					options
+				)
+			);
+		}
+	}
+
+	// A directive’s line starts an HTML block only where no element encloses
+	// it, so the next pass can add closing tags only at the end of the scope.
+	// A block’s layout takes in the next ignore comment only if its value no
+	// longer ends as its text does, which already counts as a change
+	const isChanged =
+		layout.closingTags !== '' ||
+		[...blocks].some(
+			([child, childBlocks]) =>
+				childBlocks
+					.map((block) =>
+						ignoredNodes.has(block)
+							? block.value
+							: finishLayout(
+									next,
+									block,
+									values.get(block)!,
+									values,
+									options
+								)
+					)
+					.join('\n') !== child.value
+		);
+
+	if (isChanged) {
+		reportUnsafeLayout({
+			filepath: options.filepath,
+			position: separated.position?.start,
+			reason: 'After formatting, the HTML that an ignore directive in this HTML block protects would start an HTML block of its own, so formatting the result again would change it',
+		});
+	}
+}
+
+/**
  * Checks whether Prettier’s Markdown printer puts a sibling on the line right
  * after an HTML node, without a blank line between them. Outside items printed
  * tight, `separateFromMarkdown` separates any Markdown siblings that the
@@ -1712,7 +2070,7 @@ function endBlockOnLastLine(
 	options: ParserOptions
 ): string {
 	const lines = value.split('\n');
-	const start = findBlockStartLines(value).at(-1) ?? 0;
+	const start = findBlockStartLines(value).at(-1)!;
 	const previousLine = lines[start - 1];
 
 	// After a blank line, the joined line would still start a block
@@ -1788,7 +2146,10 @@ function rejoinBrackets(value: string): string {
 		lines.splice(
 			index - 1,
 			2,
-			lines[index - 1] + (bracket === '/>' ? ' />' : '>')
+			lines[index - 1] +
+				(bracket === '/>'
+					? /* v8 ignore next -- @preserve */ ' />'
+					: '>')
 		);
 		index = findNonBlockLine(lines.join('\n'));
 	}
@@ -1800,7 +2161,10 @@ function rejoinBrackets(value: string): string {
  * Keeps the first tag of a block on one physical line when GFM recognizes the
  * block only by a complete tag on its first line.
  */
-function joinFirstTag(value: string): string {
+async function joinFirstTag(
+	value: string,
+	options: ParserOptions
+): Promise<string> {
 	if (!needsCompleteTagLine(value)) {
 		return value;
 	}
@@ -1812,7 +2176,28 @@ function joinFirstTag(value: string): string {
 		return value;
 	}
 
-	const tag = value.slice(0, tagEnd);
+	let joined = joinTagLines(value.slice(0, tagEnd));
+
+	// Prettier can break a formatted attribute value, such as a style, across
+	// lines. It prints that value on one line when the tag fits. A line break
+	// that remains belongs to the value, and the block check rejects the tag
+	if (joined.includes('\n')) {
+		const formatted = await formatHTML(value.slice(0, tagEnd), {
+			...options,
+			printWidth: Number.MAX_SAFE_INTEGER,
+		});
+
+		joined = joinTagLines(formatted.slice(0, findTagEnd(formatted, 0)));
+	}
+
+	return joined.replace(/ (?=>$)/, '') + value.slice(tagEnd);
+}
+
+/**
+ * Replaces the whitespace outside quoted attribute values in a tag with single
+ * spaces.
+ */
+function joinTagLines(tag: string): string {
 	let joined = '';
 	let quote: string | undefined;
 
@@ -1829,11 +2214,7 @@ function joinFirstTag(value: string): string {
 		}
 	}
 
-	if (joined.includes('\n')) {
-		return value;
-	}
-
-	return joined.replace(/ (?=>$)/, '') + value.slice(tagEnd);
+	return joined;
 }
 
 /**

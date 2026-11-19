@@ -173,7 +173,7 @@ function collectReadingContainers(
 		if (element) {
 			containers.set(
 				node,
-				`\`<${element.name?.toLowerCase() ?? ''}>\` element`
+				`\`<${element.name!.toLowerCase()}>\` element`
 			);
 		}
 	}
@@ -186,7 +186,7 @@ function collectReadingContainers(
  * element’s content can extend past its source span when it has no closing tag.
  */
 function findAncestors(node: HTMLNode, offset: number): HTMLNode[] {
-	for (const child of node.children ?? []) {
+	for (const child of node.children!) {
 		if (
 			child.sourceSpan.start.offset <= offset &&
 			offset < findEnd(child)
@@ -231,8 +231,7 @@ function collectProtectedMarkdown(
 
 		if (range && !(outer && generated.openStart < outer.end)) {
 			protectedMarkdown.push({
-				containers:
-					context.enclosingContainers.get(generated.node) ?? [],
+				containers: context.enclosingContainers.get(generated.node)!,
 				description: range.description,
 				end: generated.closeEnd,
 				isEnclosing: false,
@@ -261,8 +260,7 @@ function collectProtectedMarkdown(
 			)
 		) {
 			protectedMarkdown.push({
-				containers:
-					context.enclosingContainers.get(enclosing.node) ?? [],
+				containers: context.enclosingContainers.get(enclosing.node)!,
 				description: range.description,
 				end: enclosing.closeEnd,
 				isEnclosing: true,
@@ -375,8 +373,8 @@ function collectHTMLNodes(
 		if (child.kind === 'element') {
 			elementsByStart.set(start, child);
 
-			const name = child.name?.toLowerCase() ?? '';
-			const contentStart = child.startSourceSpan?.end.offset ?? end;
+			const name = child.name!.toLowerCase();
+			const contentStart = child.startSourceSpan!.end.offset;
 			const contentEnd =
 				child.endSourceSpan?.start.offset ?? Number.POSITIVE_INFINITY;
 
@@ -554,10 +552,9 @@ function collectInlineOpeners(
 			openersByFragment.set(
 				fragment.node,
 				openers.map((element) => ({
-					name:
-						/^<([^\s/>]+)/.exec(
-							context.html.slice(element.sourceSpan.start.offset)
-						)?.[1] ?? '',
+					name: /^<([^\s/>]+)/.exec(
+						context.html.slice(element.sourceSpan.start.offset)
+					)![1]!,
 					start: element.sourceSpan.start.offset,
 				}))
 			);
@@ -692,10 +689,9 @@ function collectSplitElements(
 		) {
 			elements.push({
 				closing,
-				name: element.name ?? '',
+				name: element.name!,
 				opening,
-				sourceName:
-					/^<([^\s/>]+)/.exec(context.html.slice(start))?.[1] ?? '',
+				sourceName: /^<([^\s/>]+)/.exec(context.html.slice(start))![1]!,
 			});
 		}
 	}
@@ -708,7 +704,7 @@ function collectSplitElements(
  */
 function findEnclosingElements(root: HTMLNode, offset: number): HTMLNode[] {
 	const elements: HTMLNode[] = [];
-	let children = root.children ?? [];
+	let children = root.children!;
 	let element: HTMLNode | undefined;
 
 	do {
@@ -724,7 +720,7 @@ function findEnclosingElements(root: HTMLNode, offset: number): HTMLNode[] {
 
 		if (element) {
 			elements.push(element);
-			children = element.children ?? [];
+			children = element.children!;
 		}
 	} while (element);
 
@@ -746,7 +742,7 @@ function collectRawAncestors(
 
 		while (ancestor && ancestor.kind === 'element') {
 			if (isRawElement(context, ancestor)) {
-				ancestors.unshift(ancestor.name ?? '');
+				ancestors.unshift(ancestor.name!);
 			}
 
 			ancestor = ancestor.parent;
@@ -785,19 +781,11 @@ function findToken(
  * Converts a one-based line and zero-based column into an offset.
  */
 function getOffset(text: string, line: number, column: number): number {
-	let offset = 0;
+	const lineStart = text
+		.split('\n', line - 1)
+		.reduce((offset, previousLine) => offset + previousLine.length + 1, 0);
 
-	for (let index = 1; index < line; index += 1) {
-		const next = text.indexOf('\n', offset);
-
-		if (next === -1) {
-			return text.length;
-		}
-
-		offset = next + 1;
-	}
-
-	return Math.min(offset + column, text.length);
+	return Math.min(lineStart + column, text.length);
 }
 
 /**
@@ -832,11 +820,10 @@ export function getMarkdownPosition(
 		// the original column
 		const sourceLine =
 			context.source?.split('\n')[start.line - 1 + lineIndex] ?? '';
-		const valueLine = fragment.node.value.split('\n')[lineIndex] ?? '';
+		const valueLine = fragment.node.value.split('\n')[lineIndex]!;
 		const content = valueLine.trimStart();
-		const contentColumn = content
-			? sourceLine.lastIndexOf(content)
-			: sourceLine.length;
+		// A line without content matches at the end of the source line
+		const contentColumn = sourceLine.lastIndexOf(content);
 		const indentation = valueLine.length - content.length;
 
 		return {

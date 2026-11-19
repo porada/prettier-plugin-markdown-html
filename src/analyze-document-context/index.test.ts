@@ -1,9 +1,10 @@
 import type { ParserOptions } from 'prettier';
 import type { AST } from '../types/index.d.ts';
+import * as pluginHTML from 'prettier/plugins/html';
 import * as pluginMarkdown from 'prettier/plugins/markdown';
-import { expect, test } from 'vite-plus/test';
+import { expect, onTestFinished, test, vi } from 'vite-plus/test';
 import renderDocumentContext from '../render-document-context/index.ts';
-import analyzeDocumentContext from './index.ts';
+import analyzeDocumentContext, { getMarkdownPosition } from './index.ts';
 
 const OPTIONS = { filepath: 'foo.md' } as ParserOptions;
 
@@ -69,12 +70,87 @@ bar
 	expect(analysis.protectedEnds.has(closing!)).toBe(false);
 });
 
+test('lists each Markdown construct in or around protected content once', async () => {
+	const { analysis, root } = await analyze(`<div><pre>
+
+foo <textarea>bar</textarea>
+
+</pre>
+</div>
+
+baz <textarea>qux</textarea>
+`);
+	const inside = root.children[1]!;
+	const around = root.children[3]!;
+
+	expect(analysis.protectedMarkdown).toStrictEqual([
+		{
+			containers: [],
+			description: '`<pre>` element',
+			isEnclosing: false,
+			node: inside,
+			position: inside.position?.start,
+		},
+		{
+			containers: [],
+			description: '`<textarea>` element',
+			isEnclosing: true,
+			node: around,
+			position: { column: 5, line: 8 },
+		},
+	]);
+});
+
+test('excludes void elements from the elements that inline HTML leaves open', async () => {
+	const { analysis, root } = await analyze(
+		'- foo <br> <span>\n  <div>bar</div>\n  </span>\n'
+	);
+	const block = root.children[0]!.children![0]!.children![1]!;
+
+	expect([...analysis.inlineOpenersByFragment]).toStrictEqual([
+		[block, [{ name: 'span', start: 18 }]],
+	]);
+});
+
 test('rejects HTML at its position in the Markdown', async () => {
 	await expect(analyze('foo\n\n<div><span></div>\n')).rejects
 		.toThrowErrorMatchingInlineSnapshot(`
 		[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML in \`foo.md\` (3:12):
 
 		This \`</div>\` tag doesn’t match the \`<span>\` element that is still open]
+	`);
+});
+
+test('rejects unclosed CDATA sections at their position in the Markdown', async () => {
+	await expect(analyze('foo\n\n<![CDATA[ bar\n')).rejects
+		.toThrowErrorMatchingInlineSnapshot(`
+		[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML in \`foo.md\` (3:1):
+
+		This CDATA section isn’t closed before the end of the document]
+	`);
+});
+
+test('maps errors at the end of the document context to the end of the Markdown', async () => {
+	await expect(analyze('<div>&#x\n')).rejects
+		.toThrowErrorMatchingInlineSnapshot(`
+		[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML in \`foo.md\` (2:1):
+
+		Unable to parse entity "&#x]
+	`);
+});
+
+test('reports non-error parser failures without a position', async () => {
+	const parse = vi.spyOn(pluginHTML.parsers.html, 'parse');
+	onTestFinished(() => {
+		parse.mockRestore();
+	});
+	parse.mockRejectedValue('foo');
+
+	await expect(analyze('<div></div>\n')).rejects
+		.toThrowErrorMatchingInlineSnapshot(`
+		[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML in \`foo.md\`:
+
+		foo]
 	`);
 });
 
@@ -103,4 +179,33 @@ test('accepts generated elements inside HTML tokens', async () => {
 	const closing = root.children[2] as AST.HTMLNode;
 
 	expect([...analysis.protectedStarts]).toStrictEqual([closing]);
+});
+
+test('reports the start of later HTML block lines without the Markdown source', async () => {
+	const text = '<div>\n  foo</div>\n';
+	const context = renderDocumentContext(await parseMarkdown(text));
+	const offset = context.html.indexOf('</div>');
+
+	expect(
+		getMarkdownPosition({ ...context, source: text }, offset)
+	).toStrictEqual({ column: 6, line: 2 });
+	expect(getMarkdownPosition(context, offset)).toStrictEqual({
+		column: 1,
+		line: 2,
+	});
+});
+
+test('returns `undefined` without source positions', async () => {
+	const root = await parseMarkdown('<div></div>\n\nfoo\n');
+
+	for (const child of root.children) {
+		child.position = undefined;
+	}
+
+	const context = renderDocumentContext(root);
+
+	expect(getMarkdownPosition(context, 0)).toBeUndefined();
+	expect(
+		getMarkdownPosition(context, context.html.indexOf('foo'))
+	).toBeUndefined();
 });
