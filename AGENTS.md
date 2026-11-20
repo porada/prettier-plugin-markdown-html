@@ -21,40 +21,48 @@
 ## Specification Work
 
 - **Scope:** Keep formatting behavior and its constraints in `SPEC.md`. Keep authoring and verification instructions here. Record settled rules rather than open questions, implementation history, or a catalog of current defects.
-- **Organization:** Lead with formatting outcomes. Keep the opening guarantees brief, and put specific renderer versions and example settings at the end. Keep the option mapping and override rules with Formatting Controls. Explain individual option effects alongside the formatting rules they change, and include an option only when it affects a defined rule or example.
+- **Organization:** Lead with formatting outcomes. State each opening principle in one line, link it to the section that defines it, and follow the principles with one example of ordinary formatting. Cover ordinary formatting before corrections and rejections, then introduce Formatting Controls. Put reference material, including rare edge cases, specific renderer versions, and example settings, at the end.
+- **Rule Sections:** When a section introduces a formatting rule, state the rule in the opening sentence and show an example before explaining the details. Examples are optional in sections devoted to limits, options, notices, edge cases, or reference material.
+- **Options:** Keep the option mapping and override rules with Formatting Controls. Explain individual option effects alongside the formatting rules they change, and include an option only when it affects a defined rule or example.
 - **Voice:** Write `SPEC.md` as a description of observable formatting behavior and its reasons. Use direct, explanatory prose rather than instructions addressed to the reader, and preserve the force of each rule.
-- **Examples:** Show the required formatted Markdown followed by its rendered HTML, using `###### Markdown` and `###### Rendered HTML`. Put `<!-- prettier-ignore -->` immediately before each `md` fence and only those fences. Let the formatter format the paired HTML.
+- **Durability:** Keep short-lived details such as current dates and counts out of the rules and examples. Give an exact version only when it defines a reference, as the GFM renderer’s version does. For Prettier, say that the examples use the version installed by the repository.
+- **Examples:** Use a realistic document fragment with meaningful content. Choose input that isolates one feature and would produce different output without the rule. Show the input and the required formatted Markdown under **Input** and **Output**. Include **Rendered HTML** only when the example illustrates how that output renders. Put `<!-- prettier-ignore -->` immediately before each `md` fence and only those fences. Let the formatter format the paired HTML.
 - **Test Organization:** Keep spec integration tests in `src/spec.test.ts`. Group them in `describe` blocks for the sections or subsections that define the tested behavior. Use the exact section heading text as each block’s title, and order the blocks as those sections appear in `SPEC.md`. Within each block, keep example-based tests in the same order as their examples.
-- **Tests and Examples:** Treat each spec example as a contract for integration tests that exercise the plugin. Make the correspondence clear in the tests, using the same content and effective options. Wherever the example permits it, use an input variant that is unformatted in the aspect under test, so removing that behavior would change the result. Keep protected content intact. Otherwise, use the documented Markdown as input to check preservation. Assert the exact documented Markdown output, and format changed output again with the same options to check that it remains unchanged.
+- **Tests and Examples:** Treat each spec example as a contract for integration tests that exercise the plugin. Make the correspondence clear in the tests, using the documented input and effective options. Assert the exact documented Markdown output, and format that output again with the same options to check that it remains unchanged.
 - **Contract Consistency:** When implementing or changing a rule illustrated by a spec example, keep the example and corresponding test expectations consistent. Resolve disagreements against the intended rule rather than updating examples or test expectations to match current plugin output. Additional tests may cover variations without adding examples to the spec.
 - **Conformance Status:** `SPEC.md` may define contracts ahead of their tests and implementation. When reporting coverage, distinguish examples with passing integration tests for the intended behavior from examples whose coverage remains outstanding. Skipped tests and expected failures remain outstanding. An example’s presence alone doesn’t establish coverage.
 - **Proposals:** When proposing a formatting rule, show its intended output and the current plugin’s output. Probe slightly unformatted input so unchanged output does not masquerade as successful formatting. Check a second pass, and distinguish observed behavior from the proposed contract.
-- **Verification:** Follow [Verify Examples](#verify-examples). A different Markdown renderer or GitHub.com output does not establish that comparison. Recheck all affected Markdown/HTML pairs after edits and preserve the spec’s literal examples during document formatting.
+- **Verification:** Follow [Verify Examples](#verify-examples). Use only the specified renderer for the rendered HTML comparison. Recheck all affected examples after edits and preserve the spec’s literal examples during document formatting.
 
 ## Verify Examples
 
-Use the renderer version, extensions, and baseline Prettier options in [Reference Settings](SPEC.md#reference-settings). If the required renderer isn’t installed, build the source linked from the spec’s [GFM profile](SPEC.md#gfm-profile) in a task temporary directory, following its upstream build instructions. For a temporary build, replace `cmark-gfm` in the commands below with the built executable’s path. Check the renderer and Prettier versions before comparing output:
+Use the renderer version, extensions, and baseline Prettier options in [Settings](SPEC.md#settings). If the required renderer isn’t installed, build the source linked from the spec’s [GFM Profile](SPEC.md#gfm-profile) in a task temporary directory, following its upstream build instructions. For a temporary build, replace `cmark-gfm` in the commands below with the built executable’s path. Check the renderer version before comparing rendered HTML.
 
 ```sh
 cmark-gfm --version
 ```
 
-```sh
-pnpm exec prettier --version
-```
-
-Save the Markdown fence’s contents in a task temporary file. In the commands below, replace the file placeholders with task temporary paths and the option placeholders with the spec’s baseline values. Render first, and continue only if rendering succeeds:
+For each example with **Rendered HTML**, save the **Output** fence’s contents in a task temporary file. In the commands below, replace the file placeholders with task temporary paths and the option placeholders with the spec’s baseline values. Render first, and continue only if rendering succeeds.
 
 ```sh
 cmark-gfm --unsafe -e autolink -e strikethrough -e table -e tasklist \
     < "<markdown-file>" > "<rendered-html-file>"
 ```
 
-This deliberately omits `tagfilter`, since the examples show HTML before filtering. Format that output without repository or editor configuration, which can override Prettier’s defaults:
+This deliberately omits `tagfilter`, since the examples show HTML before filtering. Format that output without repository or editor configuration, which can override Prettier’s defaults.
 
 ```sh
 pnpm exec prettier --no-config --no-editorconfig --parser html \
     --print-width "<print-width>" --tab-width "<tab-width>" < "<rendered-html-file>"
 ```
 
-Compare the successful command’s complete output with the paired HTML fence, including its final newline. A match verifies the rendered example, not the plugin’s compliance with the spec.
+Compare the successful command’s complete output with the paired HTML fence, including its final newline. A match verifies the rendered example. The integration test checks whether the plugin produces the documented Markdown.
+
+For rejected parts, protected source, and Markdown outside raw HTML, the comparison starts with **Input**. Save that fence’s contents in `<input-file>` and format them with plain Prettier. Add any options the example specifies to the baseline options below.
+
+```sh
+pnpm exec prettier --no-config --no-editorconfig --parser markdown \
+    --print-width "<print-width>" --tab-width "<tab-width>" < "<input-file>"
+```
+
+Compare those portions of the result with the corresponding text under **Output**, allowing for the differences described in [Rejected Parts](SPEC.md#rejected-parts) and [Line Breaks](SPEC.md#line-breaks).
