@@ -18,9 +18,19 @@
 - **Navigation:** Consult the relevant sections of `.agents/PROJECT.md`.
 - **Durable knowledge:** Add project knowledge to `.agents/PROJECT.md` only when its absence would likely cause a wrong future decision or substantial repeated investigation. Capture non-obvious constraints and rationale not already clear from canonical configuration, instructions, or source. Don’t record optimization recaps, routine implementation details, or workflow summaries. Prefer updating existing material over adding another explanation. If the task doesn’t permit the edit, report deferred documentation work only if it meets this threshold.
 
+## Review Formatting Behavior
+
+- **Findings:** Report failures of universal guarantees and explicit rules in `SPEC.md`, including required rejections and layout on printed lines. For a supported region, a rendering change is a defect when plain Prettier preserves its rendering under the same options, subject to [Conformance](SPEC.md#conformance) and [Limits](SPEC.md#limits). A [stability defect](SPEC.md#stability) occurs when a second pass with the same settings changes accepted HTML in a supported shape.
+- **Rendering comparisons:** Render the input, plain Prettier’s output, and the plugin’s output with the renderer command in [Verify Examples](#verify-examples), then compare the affected region under [Conformance](SPEC.md#conformance).
+- **Upstream defects:** Report defects in Prettier’s Markdown layout or HTML formatter output upstream. Follow [Prettier’s layout of the surrounding Markdown](SPEC.md#limits) and apply the [inline tag rule](SPEC.md#line-breaks) even where plain Prettier would wrap the line. Reject the region if the HTML formatter fails or the printed block fails its [boundary and container check](SPEC.md#block-html).
+- **Unsupported shapes:** A reported change of meaning outside the supported shapes that breaks no explicit rule is a candidate for narrowing. Add a rejection if a feature of Prettier’s tree or the region’s source identifies the shape. Otherwise the [general limit](SPEC.md#limits) already covers it.
+- **Large or repeated fixes:** For a shape absent from real documents, narrow the rule when a fix would require more code or formatting rules than its use warrants. When a finding reopens a rule that already needed a correction, reconsider whether to narrow or drop the rule before patching it again.
+
 ## Specification Work
 
 - **Scope:** Keep formatting behavior and its constraints in `SPEC.md`. Keep authoring and verification instructions here. Record settled rules rather than open questions, implementation history, or a catalog of current defects.
+- **Evidence:** Add a formatting rule, exception, or guarantee only when a real document needs it or a user reports the need. Cite a public file at a specific commit or the user’s report. A constructed example alone cannot establish the need.
+- **Changes During Implementation:** During implementation, change `SPEC.md` only to narrow or remove a guarantee. A new guarantee requires the user’s decision.
 - **Organization:** Lead with formatting outcomes. State each opening principle in one line, link it to the section that defines it, and follow the principles with one example of ordinary formatting. Cover ordinary formatting before corrections and rejections, then introduce Formatting Controls. Put reference material, including specific renderer versions and example settings, at the end.
 - **Rule Sections:** When a section introduces a formatting rule, state the rule in the opening sentence and show an example before explaining the details. Examples are optional in sections devoted to limits, options, notices, edge cases, or reference material.
 - **Options:** Keep the option mapping and override rules with Formatting Controls. Explain individual option effects alongside the formatting rules they change, and include an option only when it affects a defined rule or example.
