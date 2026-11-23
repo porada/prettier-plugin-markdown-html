@@ -9,3 +9,12 @@ test('identifies block tag names', () => {
 	expect(isBlockTag('source')).toBe(true);
 	expect(isBlockTag('span')).toBe(false);
 });
+
+test('identifies closing tags that can interrupt a paragraph', () => {
+	expect(isBlockTag('div', true)).toBe(true);
+	expect(isBlockTag('title', true)).toBe(true);
+	expect(isBlockTag('pre', true)).toBe(false);
+	expect(isBlockTag('script', true)).toBe(false);
+	expect(isBlockTag('style', true)).toBe(false);
+	expect(isBlockTag('TEXTAREA', true)).toBe(false);
+});

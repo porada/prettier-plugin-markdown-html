@@ -13,8 +13,8 @@ const HTML_COMPLETE_TAG_LINE_PATTERN = new RegExp(
 	'i'
 );
 
-// Tags for which Prettier and the reference renderer disagree on whether an
-// HTML block requires a complete tag on its own line
+// Tags that Prettier and the reference renderer classify differently at block
+// starts unless the complete tag is alone on its line
 const HTML_DISPUTED_BLOCK_TAG_NAMES = new Set([
 	'hgroup',
 	'meta',
@@ -22,11 +22,14 @@ const HTML_DISPUTED_BLOCK_TAG_NAMES = new Set([
 	'source',
 ]);
 
-// This pattern matches possible raw HTML starts in Markdown text: opening and
-// closing tags, comments, processing instructions, declarations, and CDATA
-// sections
-const HTML_INLINE_START_PATTERN =
-	/<[A-Za-z][A-Za-z0-9-]*(?:[\t\n\v\f\r ]+[A-Za-z_:][\w.:-]*(?:[\t\n\v\f\r ]*=[\t\n\v\f\r ]*(?:[^\t\n\v\f\r "'<=>`]+|'[^']*'|"[^"]*"))?)*[\t\n\v\f\r ]*\/?>|<\/[A-Za-z][A-Za-z0-9-]*[\t\n\v\f\r ]*>|<!--|<\?|<![A-Z]|<!\[CDATA\[/;
+// A closing tag at the start of HTML
+const HTML_CLOSING_TAG_PATTERN = /^<\/([a-z][a-z0-9-]*)\s*>/i;
+
+// A declaration, such as a doctype in any letter case
+const HTML_DECLARATION_PATTERN = /^<![A-Za-z]/;
+
+// An opening tag’s name at the start of HTML
+const HTML_OPENING_TAG_PATTERN = /^<([a-z][a-z0-9-]*)(?=[\t\n\f\r />])/i;
 
 // The reference renderer treats these tags as block tags, unlike Prettier’s
 // Markdown parser
@@ -89,14 +92,6 @@ export default function isHTMLBlockSequence(
 }
 
 /**
- * Checks conservatively whether Markdown text can contain raw HTML that the
- * reference renderer recognizes. Escapes and code spans don’t prevent a match.
- */
-export function containsRawHTML(text: string): boolean {
-	return HTML_INLINE_START_PATTERN.test(text);
-}
-
-/**
  * Checks whether a line can interrupt a paragraph with an HTML block in the
  * reference renderer.
  */
@@ -105,17 +100,24 @@ export function canInterruptParagraph(line: string): boolean {
 }
 
 /**
- * Returns the end condition of the HTML block that a line starts in the
- * reference renderer. Blocks without one continue until a blank line.
+ * Checks whether HTML at the start of a line interrupts a paragraph under
+ * either GitHub Flavored Markdown or Prettier’s Markdown parser.
  */
-export function findHTMLBlockEnd(line: string): RegExp | undefined {
-	return readHTMLBlockStart(line, false)?.end;
+export function startsBlockInParagraph(html: string): boolean {
+	const openingName = HTML_OPENING_TAG_PATTERN.exec(html)?.[1];
+	const closingName = HTML_CLOSING_TAG_PATTERN.exec(html)?.[1];
+
+	return (
+		canInterruptParagraph(html) ||
+		HTML_DECLARATION_PATTERN.test(html) ||
+		(openingName !== undefined && isBlockTag(openingName)) ||
+		(closingName !== undefined && isBlockTag(closingName, true))
+	);
 }
 
 /**
- * Checks whether a line starts an HTML block outside a paragraph under the
- * reference renderer’s rules, also accepting tags that Prettier treats as block
- * tags.
+ * Checks for an HTML block start outside a paragraph, using the reference
+ * renderer’s rules and Prettier’s additional block tags.
  */
 export function startsHTMLBlock(line: string): boolean {
 	// Only spaces and tabs indent a line
@@ -165,12 +167,9 @@ export function endsInContinuingBlock(text: string): boolean {
 }
 
 /**
- * Reads how an HTML block that continues until a blank line takes in the HTML
- * on the lines after it. Returns `continues` if that HTML has no blank line, so
- * the block takes all of it in. Otherwise, the block ends at its first blank
- * line. Returns `ends` if the HTML reads the same from there, or `splits` if
- * the blank line falls inside a block with an end condition, so its remaining
- * lines are no longer parsed as part of that block.
+ * Checks how far an open HTML block extends into the HTML that follows. Returns
+ * `continues` if there is no blank line, `splits` if the first blank line
+ * interrupts another HTML block, or `ends` otherwise.
  */
 export function readTakenInHTML(html: string): 'continues' | 'ends' | 'splits' {
 	const lines = html.split('\n');

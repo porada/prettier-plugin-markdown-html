@@ -2,9 +2,9 @@ import type { ParserOptions, Plugin } from 'prettier';
 import type { AST } from '../types/index.d.ts';
 import { format } from 'prettier';
 import * as pluginMarkdown from 'prettier/plugins/markdown';
-import { expect, test } from 'vite-plus/test';
+import { expect, onTestFinished, test, vi } from 'vite-plus/test';
 import * as pluginMarkdownHTML from '../index.ts';
-import formatInlineHTML, { formatInlineTagName } from './index.ts';
+import formatInlineHTML from './index.ts';
 
 const OPTIONS = { printWidth: 30, tabWidth: 4 } as ParserOptions;
 
@@ -22,13 +22,7 @@ async function parseParagraph(source: string): Promise<{
 	) as AST.HTMLNode;
 
 	return {
-		fragment: createFragment(node.value, {
-			block: paragraph,
-			end: node.position!.end.offset!,
-			node,
-			parent: paragraph,
-			start: node.position!.start.offset!,
-		}),
+		fragment: createFragment(node.value, { node, parent: paragraph }),
 		layout: { containerEdge: 0, containers: [], contentEdge: 0, paragraph },
 	};
 }
@@ -68,14 +62,9 @@ function createFragment(
 	const node: AST.HTMLNode = { type: 'html', value };
 
 	return {
-		block: undefined,
-		end: value.length,
-		isBlock: false,
-		isInTableCell: false,
 		isSingleLine: false,
 		node,
 		parent: { children: [node], type: 'paragraph' },
-		start: 0,
 		...overrides,
 	};
 }
@@ -84,13 +73,7 @@ test('formats opening tags without their closing tags', async () => {
 	const fragment = createFragment('<span   id = "foo">');
 	const formattedNodes = new WeakSet<AST.Node>();
 
-	await formatInlineHTML(
-		[fragment],
-		undefined,
-		new Set(),
-		OPTIONS,
-		formattedNodes
-	);
+	await formatInlineHTML([fragment], undefined, OPTIONS, formattedNodes);
 
 	expect(fragment.node.value).toBe('<span id="foo">');
 	expect(formattedNodes.has(fragment.node)).toBe(true);
@@ -100,17 +83,10 @@ test('formats void and closing tags', async () => {
 	const voidFragment = createFragment('<img   src="foo.png">');
 	const closingFragment = createFragment('</span   >');
 
-	await formatInlineHTML(
-		[voidFragment],
-		undefined,
-		new Set(),
-		OPTIONS,
-		new WeakSet()
-	);
+	await formatInlineHTML([voidFragment], undefined, OPTIONS, new WeakSet());
 	await formatInlineHTML(
 		[closingFragment],
 		undefined,
-		new Set(),
 		OPTIONS,
 		new WeakSet()
 	);
@@ -119,30 +95,14 @@ test('formats void and closing tags', async () => {
 	expect(closingFragment.node.value).toBe('</span>');
 });
 
-test('keeps other HTML tokens and protected content unchanged', async () => {
-	const commentFragment = createFragment('<!--   foo   -->');
-	const protectedFragment = createFragment('<span   id = "bar">');
+test('keeps other HTML tokens unchanged', async () => {
+	const fragment = createFragment('<!--   foo   -->');
 	const formattedNodes = new WeakSet<AST.Node>();
 
-	await formatInlineHTML(
-		[commentFragment],
-		undefined,
-		new Set(),
-		OPTIONS,
-		formattedNodes
-	);
-	await formatInlineHTML(
-		[protectedFragment],
-		undefined,
-		new Set([protectedFragment.node]),
-		OPTIONS,
-		formattedNodes
-	);
+	await formatInlineHTML([fragment], undefined, OPTIONS, formattedNodes);
 
-	expect(commentFragment.node.value).toBe('<!--   foo   -->');
-	expect(protectedFragment.node.value).toBe('<span   id = "bar">');
-	expect(formattedNodes.has(commentFragment.node)).toBe(false);
-	expect(formattedNodes.has(protectedFragment.node)).toBe(false);
+	expect(fragment.node.value).toBe('<!--   foo   -->');
+	expect(formattedNodes.has(fragment.node)).toBe(false);
 });
 
 test('lays out opening tags at their position in the paragraph', async () => {
@@ -152,7 +112,6 @@ test('lays out opening tags at their position in the paragraph', async () => {
 	await formatInlineHTML(
 		[fragment],
 		layout,
-		new Set(),
 		{ ...OPTIONS, originalText: source, printWidth: 40 },
 		new WeakSet()
 	);
@@ -169,7 +128,6 @@ test('lays out final opening tags without content after them', async () => {
 	await formatInlineHTML(
 		[fragment],
 		layout,
-		new Set(),
 		{ ...OPTIONS, originalText: source, printWidth: 32 },
 		new WeakSet()
 	);
@@ -186,7 +144,6 @@ test('rejoins brackets whose lines would start block quotes', async () => {
 	await formatInlineHTML(
 		[fragment],
 		layout,
-		new Set(),
 		{ ...OPTIONS, originalText: source, printWidth: 40, tabWidth: 2 },
 		new WeakSet()
 	);
@@ -201,7 +158,6 @@ test('keeps one-line forms where attribute lines would start HTML blocks', async
 	await formatInlineHTML(
 		[fragment],
 		layout,
-		new Set(),
 		{ ...OPTIONS, originalText: source, tabWidth: 1 },
 		new WeakSet()
 	);
@@ -218,7 +174,6 @@ test('keeps brackets on the last attribute line where value lines would start wi
 	await formatInlineHTML(
 		[fragment],
 		layout,
-		new Set(),
 		{ ...OPTIONS, originalText: source, tabWidth: 2 },
 		new WeakSet()
 	);
@@ -261,6 +216,41 @@ test.each([
 	}
 );
 
+test('measures the spaces inside a multiline code span before an opening tag', async () => {
+	const options = {
+		parser: 'markdown',
+		plugins: [pluginMarkdownHTML],
+		printWidth: 32,
+		proseWrap: 'always' as const,
+		tabWidth: 4,
+	};
+	const input = 'Run `git\n      status` <p>ready now</p>\n';
+	const output = await format(input, options);
+
+	expect(output).toBe('Run `git       status` <p\n    >ready now</p>\n');
+	await expect(format(output, options)).resolves.toBe(output);
+});
+
+test.each(['div', 'span'])(
+	'keeps a literal list marker after a hard break when laying out a task item’s %s tag',
+	async (tag) => {
+		const options = {
+			parser: 'markdown',
+			plugins: [pluginMarkdownHTML],
+			printWidth: 40,
+			proseWrap: 'never' as const,
+			tabWidth: 4,
+		};
+		const input = `- [ ] <${tag} title="A longer title for this link">\nread  \n  1.\n      </${tag}>\n`;
+		const output = await format(input, options);
+
+		expect(output).toBe(
+			`- [ ] <${tag}\n          title="A longer title for this link"\n      > read  \n      1. </${tag}>\n`
+		);
+		await expect(format(output, options)).resolves.toBe(output);
+	}
+);
+
 test('lays out tags after lazy lines of equals signs that Prettier joins', async () => {
 	const options = {
 		parser: 'markdown',
@@ -299,19 +289,29 @@ test('lays out tags after no-break spaces that end lines Prettier joins', async 
 	await expect(format(output, options)).resolves.toBe(output);
 });
 
-test('reports wrapping that would open a math block on a later line', async () => {
-	await expect(
-		format('foo <b   >bar</b> $$\n', {
-			parser: 'markdown',
-			plugins: [pluginMarkdownHTML],
-			printWidth: 14,
-			proseWrap: 'always',
-		})
-	).rejects.toThrowErrorMatchingInlineSnapshot(`
-		[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout (1:1):
+test('rejects paragraphs whose wrapping would open a math block on a later line', async () => {
+	const warn = vi.spyOn(console, 'warn').mockReturnValue(undefined);
+	onTestFinished(() => {
+		warn.mockRestore();
+	});
+	const input = 'foo <b   >bar</b> $$\n';
+	const options = {
+		parser: 'markdown',
+		printWidth: 14,
+		proseWrap: 'always' as const,
+	};
 
-		After formatting, this paragraph’s lines would no longer read as one paragraph, which would change the context of its HTML]
-	`);
+	const output = await format(input, {
+		...options,
+		plugins: [pluginMarkdownHTML],
+	});
+
+	expect(output).toBe(await format(input, { ...options, plugins: [] }));
+	expect(warn.mock.calls).toStrictEqual([
+		[
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
+		],
+	]);
 });
 
 test('keeps one-line forms where tag layouts would wrap math blocks onto later lines', async () => {
@@ -429,7 +429,6 @@ test('lays out leading tags before hard line breaks without positions', async ()
 	await formatInlineHTML(
 		[fragment],
 		layout,
-		new Set(),
 		{ ...OPTIONS, originalText: source },
 		new WeakSet()
 	);
@@ -444,13 +443,7 @@ test('keeps tags on one line without a paragraph layout', async () => {
 		'<span title="foo" data-bar="baz" data-qux="quux">'
 	);
 
-	await formatInlineHTML(
-		[fragment],
-		undefined,
-		new Set(),
-		OPTIONS,
-		new WeakSet()
-	);
+	await formatInlineHTML([fragment], undefined, OPTIONS, new WeakSet());
 
 	expect(fragment.node.value).toBe(
 		'<span title="foo" data-bar="baz" data-qux="quux">'
@@ -459,42 +452,35 @@ test('keeps tags on one line without a paragraph layout', async () => {
 
 test('keeps tags on one line in headings and table cells', async () => {
 	const fragment = createFragment(
-		'<span title="foo" data-bar="baz|qux" data-quux="corge">',
-		{ isInTableCell: true, isSingleLine: true }
+		'<span   title="foo"   data-bar="baz" data-qux="quux">',
+		{ isSingleLine: true }
 	);
-	fragment.node.value = String.raw`<span title="foo" data-bar="baz\|qux" data-quux="corge">`;
 
 	await formatInlineHTML(
 		[fragment],
 		undefined,
-		new Set(),
 		{ ...OPTIONS, singleAttributePerLine: true },
 		new WeakSet()
 	);
 
 	expect(fragment.node.value).toBe(
-		String.raw`<span title="foo" data-bar="baz\|qux" data-quux="corge">`
+		'<span title="foo" data-bar="baz" data-qux="quux">'
 	);
 });
 
-test('keeps protected tags at the start of paragraphs as written', async () => {
+test('keeps inline tags as written when an enclosing pre spans HTML blocks', async () => {
+	const warn = vi.spyOn(console, 'warn').mockReturnValue(undefined);
+	onTestFinished(() => {
+		warn.mockRestore();
+	});
 	const input =
 		'<div><pre>\n\n<span  title = "foo"> bar</span>\n\n</pre>\n</div>\n';
 	const options = { parser: 'markdown', plugins: [pluginMarkdownHTML] };
 
-	const output = await format(input, options);
-
-	expect(output).toBe(
-		'<div>\n  <pre>\n\n<span  title = "foo"> bar</span>\n\n</pre>\n</div>\n'
-	);
-	await expect(format(output, options)).resolves.toBe(output);
-});
-
-test('keeps the names of tags that inline formatting preserves', async () => {
-	await expect(
-		formatInlineTagName('über', false, OPTIONS, undefined)
-	).resolves.toBe('über');
-	await expect(
-		formatInlineTagName('über', true, OPTIONS, undefined)
-	).resolves.toBe('über');
+	await expect(format(input, options)).resolves.toBe(input);
+	expect(warn.mock.calls).toStrictEqual([
+		[
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:6): Keep `<pre>` and `</pre>` together in one HTML block.',
+		],
+	]);
 });

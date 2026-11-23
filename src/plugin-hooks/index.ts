@@ -12,7 +12,7 @@ import type {
 	ResolvedPriorPrinter,
 } from '../types/index.d.ts';
 import { printers as markdownPrinters } from 'prettier/plugins/markdown';
-import { reportIncompatibleParser } from '../report-error/index.ts';
+import { reportUnsupportedASTFormat } from '../report-error/index.ts';
 
 type ParserDelegationContext = {
 	delegation?: ResolvedPriorParser['delegation'];
@@ -56,7 +56,7 @@ const PRINTER_MARKER = Symbol.for('prettier-plugin-markdown-html.printer');
  */
 export function markParserAsOwn(parser: Parser): Parser {
 	Object.defineProperty(parser, PARSER_MARKER, { value: true });
-	// Copies retain hook identities without marking their overrides as canonical
+	// Copies retain the original hook identities even when they override a hook
 	Object.defineProperty(parser, PARSER_ORIGIN, {
 		enumerable: true,
 		value: { parse: parser.parse, preprocess: parser.preprocess },
@@ -65,8 +65,7 @@ export function markParserAsOwn(parser: Parser): Parser {
 }
 
 /**
- * Checks whether a parser carries this plugin’s marker directly
- * or through inheritance.
+ * Checks whether a parser defines or inherits this plugin’s marker.
  */
 function isOwnParser(parser: Parser): boolean {
 	return Reflect.get(parser, PARSER_MARKER) === true;
@@ -78,6 +77,38 @@ function isOwnParser(parser: Parser): boolean {
 export function markPrinterAsOwn(printer: Printer): Printer {
 	Object.defineProperty(printer, PRINTER_MARKER, { value: true });
 	return printer;
+}
+
+/**
+ * Checks whether Prettier selects this printer for the parser’s AST format.
+ */
+export function selectsPrinter(
+	{ astFormat, plugins }: ParserOptions,
+	parserName: string,
+	printer: Printer
+): boolean {
+	/* v8 ignore next 3 -- @preserve */
+	if (typeof astFormat !== 'string') {
+		return false;
+	}
+
+	const parserPlugin = plugins.findLast(
+		(plugin) =>
+			hasParsers(plugin) && Object.hasOwn(plugin.parsers, parserName)
+	);
+	const printerPlugin =
+		hasPrinters(parserPlugin) && parserPlugin.printers[astFormat]
+			? parserPlugin
+			: plugins.findLast(
+					(plugin) =>
+						hasPrinters(plugin) &&
+						Object.hasOwn(plugin.printers, astFormat)
+				);
+
+	return (
+		hasPrinters(printerPlugin) &&
+		printerPlugin.printers[astFormat] === printer
+	);
 }
 
 /**
@@ -189,8 +220,8 @@ export function createPriorParserResolver(
 }
 
 /**
- * Finds the nearest prior compatible parser with a distinct implementation
- * of the requested hook.
+ * Finds the nearest prior compatible parser with a distinct implementation of
+ * the requested hook.
  */
 async function findPriorParser(
 	state: ParserResolverState,
@@ -327,9 +358,11 @@ function assertCompatibleParser(
 	expectedAstFormat: string
 ): void {
 	if (parser.astFormat !== expectedAstFormat) {
-		reportIncompatibleParser({
+		reportUnsupportedASTFormat({
+			expected: expectedAstFormat,
 			filepath,
-			reason: `This plugin requires \`${expectedAstFormat}\` syntax trees, but the \`${name}\` parser from another plugin produces \`${parser.astFormat}\` syntax trees`,
+			name,
+			received: parser.astFormat,
 		});
 	}
 }
@@ -707,7 +740,7 @@ export async function withPriorParserOptions<T>(
 		}
 
 		if (previousContext) {
-			// Automatic handoff becomes the parent’s baseline, not an explicit override
+			// Nested handoffs are defaults, not explicit hook overrides
 			previousContext.snapshot = {
 				locEnd: options.locEnd,
 				locStart: options.locStart,

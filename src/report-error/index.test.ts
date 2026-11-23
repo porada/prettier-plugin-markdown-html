@@ -1,23 +1,22 @@
 import { expect, test } from 'vite-plus/test';
 import {
-	describeGeneratedElement,
+	describeRejectedRegion,
+	isFormatterFailure,
 	reportFormatterFailure,
-	reportIncompatibleParser,
-	reportInvalidHTML,
+	reportRejectedRegion,
 	reportUnsafeLayout,
-	reportUnsupportedMarkdown,
-	withArticle,
+	reportUnsupportedASTFormat,
 } from './index.ts';
 
 test('reports errors with the file, the Markdown position, and the reason', () => {
 	expect(() =>
-		reportInvalidHTML({
+		reportUnsafeLayout({
 			filepath: 'foo.md',
 			position: { column: 2, line: 3 },
 			reason: 'Bar',
 		})
 	).toThrowErrorMatchingInlineSnapshot(`
-		[SyntaxError: [prettier-plugin-markdown-html] Invalid HTML in \`foo.md\` (3:2):
+		[Error: [prettier-plugin-markdown-html] Unsafe Markdown layout in \`foo.md\` (3:2):
 
 		Bar]
 	`);
@@ -28,30 +27,61 @@ test('reports errors with the file, the Markdown position, and the reason', () =
 		Baz]
 	`);
 	expect(() =>
-		reportUnsupportedMarkdown({ filepath: 'qux.md', reason: 'Quux' })
+		reportRejectedRegion({
+			position: { column: 4, line: 5 },
+			reason: 'Qux',
+		})
 	).toThrowErrorMatchingInlineSnapshot(`
-		[Error: [prettier-plugin-markdown-html] Unsupported Markdown in \`qux.md\`:
+		[Error: [prettier-plugin-markdown-html] PRETTIER_DEBUG stopped formatting (5:4):
 
-		Quux]
+		Qux]
 	`);
-	expect(() => reportIncompatibleParser({ reason: 'Corge' }))
-		.toThrowErrorMatchingInlineSnapshot(`
-		[TypeError: [prettier-plugin-markdown-html] Incompatible parser:
+});
 
-		Corge]
-	`);
+test('describes regions that fall back to plain Prettier on one line', () => {
+	expect(
+		describeRejectedRegion({
+			filepath: 'foo.md',
+			position: { column: 2, line: 3 },
+			reason: 'Bar',
+		})
+	).toBe(
+		'[prettier-plugin-markdown-html] Skipped HTML formatting in `foo.md` (3:2): Bar'
+	);
+});
+
+test('reports syntax trees from other parsers that the plugin can’t format', () => {
+	expect(() =>
+		reportUnsupportedASTFormat({
+			expected: 'mdast',
+			name: 'markdown',
+			received: 'foo',
+		})
+	).toThrowErrorMatchingInlineSnapshot(
+		`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`markdown\` parser. Expected \`mdast\`, received \`foo\`]`
+	);
+	expect(() =>
+		reportUnsupportedASTFormat({
+			expected: 'mdast',
+			filepath: 'bar.md',
+			name: 'remark',
+			received: undefined,
+		})
+	).toThrowErrorMatchingInlineSnapshot(
+		`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`remark\` parser. Expected \`mdast\`, received \`undefined\` while formatting \`bar.md\`]`
+	);
 });
 
 test('exposes the Markdown position to Prettier', () => {
 	let result: unknown;
 
 	try {
-		reportInvalidHTML({ position: { column: 2, line: 3 }, reason: 'Foo' });
+		reportUnsafeLayout({ position: { column: 2, line: 3 }, reason: 'Foo' });
 	} catch (error: unknown) {
 		result = error;
 	}
 
-	expect(result).toBeInstanceOf(SyntaxError);
+	expect(result).toBeInstanceOf(Error);
 	expect((result as { loc?: unknown }).loc).toStrictEqual({
 		start: { column: 2, line: 3 },
 	});
@@ -68,6 +98,8 @@ test('keeps the formatter’s error as the cause', () => {
 	}
 
 	expect(result).toBeInstanceOf(SyntaxError);
+	expect(isFormatterFailure(result)).toBe(true);
+	expect(isFormatterFailure(new Error('Baz'))).toBe(false);
 	expect((result as Error).cause).toBe(cause);
 	expect((result as Error).message).toMatchInlineSnapshot(`
 		"[prettier-plugin-markdown-html] Failed to format HTML with Prettier in \`bar.md\`:
@@ -83,20 +115,4 @@ test('reports formatter failures that aren’t errors', () => {
 
 		Foo]
 	`);
-});
-
-test('names the Markdown constructs that generate elements', () => {
-	expect(describeGeneratedElement('blockquote')).toBe('block quote');
-	expect(describeGeneratedElement('del')).toBe('strikethrough text');
-	expect(describeGeneratedElement('h3')).toBe('heading');
-	expect(describeGeneratedElement('li')).toBe('list item');
-	expect(describeGeneratedElement('p')).toBe('paragraph');
-	expect(describeGeneratedElement('td')).toBe('table cell');
-	expect(describeGeneratedElement('foo')).toBe('`<foo>`');
-});
-
-test('adds indefinite articles to the names of Markdown constructs', () => {
-	expect(withArticle('emphasized text')).toBe('emphasized text');
-	expect(withArticle('image')).toBe('an image');
-	expect(withArticle('list item')).toBe('a list item');
 });

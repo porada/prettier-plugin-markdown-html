@@ -1,7 +1,6 @@
 import { expect, test } from 'vite-plus/test';
 import isHTMLBlockSequence, {
 	canInterruptParagraph,
-	findHTMLBlockEnd,
 	findNonBlockLine,
 	needsCompleteTagLine,
 	readTakenInHTML,
@@ -98,15 +97,6 @@ test('detects lines that start HTML blocks, including Prettier’s block tags', 
 	expect(startsHTMLBlock('<div>foo')).toBe(true);
 	expect(startsHTMLBlock('<search>foo')).toBe(true);
 	expect(startsHTMLBlock('<span>foo')).toBe(false);
-});
-
-test('finds the end conditions of HTML blocks that have one', () => {
-	expect(findHTMLBlockEnd('<!-- foo')).toStrictEqual(/-->/);
-	expect(findHTMLBlockEnd('<pre>')).toStrictEqual(
-		/<\/(?:pre|script|style|textarea)>/i
-	);
-	expect(findHTMLBlockEnd('<div>')).toBeUndefined();
-	expect(findHTMLBlockEnd('<span>')).toBeUndefined();
 });
 
 test('detects lines that start HTML blocks after spaces and tabs only', () => {

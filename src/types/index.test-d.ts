@@ -10,6 +10,7 @@ import type {
 	PluginWithPrinters,
 	PrinterInitializer,
 	PriorParserResolver,
+	Regions,
 	ResolvedPriorParser,
 	ResolvedPriorPrinter,
 } from './index.d.ts';
@@ -23,10 +24,7 @@ test('exposes valid types', () => {
 	expectTypeOf<AST.HTMLNode>().toBeObject();
 
 	expectTypeOf<AST.BlockScope>().toBeObject();
-	expectTypeOf<AST.DocumentAnalysis>().toBeObject();
-	expectTypeOf<AST.DocumentContext>().toBeObject();
 	expectTypeOf<AST.Fragment>().toBeObject();
-	expectTypeOf<AST.GeneratedElement>().toBeObject();
 
 	expectTypeOf<AST.Point>().toBeObject();
 	expectTypeOf<AST.Position>().toBeObject();
@@ -51,6 +49,29 @@ test('exposes valid types', () => {
 	expectTypeOf<PluginOptions>()
 		.toHaveProperty('htmlFragmentWhitespaceSensitivity')
 		.toEqualTypeOf<PrettierOptions['htmlWhitespaceSensitivity']>();
+
+	expectTypeOf<Regions.BlockRegion>().toBeObject();
+	expectTypeOf<Regions.ClosingTag>().toBeObject();
+	expectTypeOf<Regions.ClosingTagToken>().toBeObject();
+	expectTypeOf<Regions.Container>().toBeObject();
+	expectTypeOf<Regions.Corrections>().toBeObject();
+	expectTypeOf<Regions.Document>().toBeObject();
+	expectTypeOf<Regions.DocumentRegions>().toBeObject();
+	expectTypeOf<Regions.Element>().toBeObject();
+	expectTypeOf<Regions.Fragment>().toBeObject();
+	expectTypeOf<Regions.InlineBlock>().toBeObject();
+	expectTypeOf<Regions.InlineRegion>().toBeObject();
+	expectTypeOf<Regions.Location>().toBeObject();
+	expectTypeOf<Regions.OpaqueConstruct>().toBeString();
+	expectTypeOf<Regions.OpaqueSource>().toBeObject();
+	expectTypeOf<Regions.OpaqueToken>().toBeObject();
+	expectTypeOf<Regions.OpeningTag>().toBeObject();
+	expectTypeOf<Regions.OpeningTagToken>().toBeObject();
+	expectTypeOf<Regions.Region>().toBeObject();
+	expectTypeOf<Regions.Problem>().toBeObject();
+	expectTypeOf<Regions.Protection>().toBeObject();
+	expectTypeOf<Regions.Token>().toBeObject();
+	expectTypeOf<Regions.Verdict>().toBeObject();
 
 	expectTypeOf<PluginWithParsers>().toBeObject();
 	expectTypeOf<PluginWithParsers>().toHaveProperty('parsers');

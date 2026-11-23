@@ -1,22 +1,30 @@
 import type { ParserOptions } from 'prettier';
-import type { AST } from '../types/index.d.ts';
-import analyzeDocumentContext from '../analyze-document-context/index.ts';
-import checkFenceFormatting from '../check-fence-formatting/index.ts';
-import checkProtectedMarkdown from '../check-protected-markdown/index.ts';
-import checkReferenceReadings from '../check-reference-readings/index.ts';
+import type { RegionDecisions, Rejection } from '../decide-regions/index.ts';
+import type { AST, Regions } from '../types/index.d.ts';
+import { parsers as markdownParsers } from 'prettier/plugins/markdown';
+import { IGNORE_COMMENT_PATTERN } from '../constants/index.ts';
+import decideRegions, {
+	createRoleSentinels,
+	diagnoseFormatting,
+	findChangedBlocks,
+	findChangedRoles,
+	findMovedIgnoreComments,
+	findRegionAt,
+	isRejected,
+	listContainerAncestors,
+	listNotices,
+	listRegions,
+	listRejectedNodes,
+	listUnmarkableRegions,
+	locateRoleSentinels,
+} from '../decide-regions/index.ts';
 import formatBlockHTML, {
-	checkSourceBlocks,
-	IGNORE_COMMENT_PATTERN,
+	getScopeOptions,
 } from '../format-block-html/index.ts';
-import formatInlineHTML, {
-	formatInlineTagName,
-} from '../format-inline-html/index.ts';
-import isLooseList, { isSeparatedFromNext } from '../is-loose-list/index.ts';
-import renderDocumentContext from '../render-document-context/index.ts';
-import {
-	reportChangedTagSpelling,
-	reportUnsafeLayout,
-} from '../report-error/index.ts';
+import formatInlineHTML from '../format-inline-html/index.ts';
+import removeHTMLNode from '../remove-html-node/index.ts';
+import { isFormatterFailure } from '../report-error/index.ts';
+import reportNotices from '../report-notices/index.ts';
 
 type ScopeLayout = Pick<
 	AST.BlockScope,
@@ -24,18 +32,17 @@ type ScopeLayout = Pick<
 	| 'endsOpenBlocks'
 	| 'isListItem'
 	| 'isPrintedTight'
-	| 'isTight'
 	| 'prefixWidth'
 >;
 
 type ScopeState = {
 	activeIgnoreComments: Set<AST.Node>;
-	analysis: AST.DocumentAnalysis;
+	// HTML blocks of accepted regions
 	blockFragments: Set<AST.HTMLNode>;
+	decisions: RegionDecisions;
+	// HTML of accepted regions
 	fragments: Set<AST.HTMLNode>;
 	ignoredNodes: Set<AST.Node>;
-	// Whether processing validates the input without formatting it
-	isValidationOnly: boolean;
 	options: ParserOptions;
 	// Where each paragraph’s printed lines and its container’s content start
 	paragraphEdges: Map<
@@ -44,107 +51,217 @@ type ScopeState = {
 	>;
 };
 
+// The own properties of a node before layout, to restore after a region fails
+type NodeSnapshot = {
+	node: AST.Node;
+	properties: Record<string, unknown>;
+};
+
 // Prettier prints no list item number above this one
 const MAX_LIST_NUMBER = 999_999_999;
 
 export const formattedHTMLNodes = new WeakSet<AST.Node>();
 
 /**
- * Formats raw HTML throughout a Markdown syntax tree, reporting an error when
- * the HTML is rejected in its document context or can’t be laid out without
- * changing the document’s interpretation.
+ * Reports regions whose layout fails, so formatting can start again with those
+ * regions rejected.
+ */
+class RegionLayoutError extends Error {
+	readonly rejections: ReadonlyArray<{
+		problem: Rejection;
+		region: Regions.Region;
+	}>;
+
+	constructor(
+		cause: unknown,
+		rejections: ReadonlyArray<{
+			problem: Rejection;
+			region: Regions.Region;
+		}>
+	) {
+		super(
+			'Formatting would change how Prettier reads the Markdown around this HTML.',
+			{ cause }
+		);
+		this.name = 'RegionLayoutError';
+		this.rejections = rejections;
+	}
+}
+
+/**
+ * Formats raw HTML region by region and reports rejected regions as notices. The
+ * optional printer checks whether each fragment keeps its source role.
  */
 export default async function preprocessMarkdown(
 	root: AST.Node,
-	options: ParserOptions
-): Promise<AST.Node> {
-	return processMarkdown(root, options, false);
-}
-
-/**
- * Reports an error when raw HTML throughout a Markdown syntax tree is rejected
- * in its document context, without formatting it.
- */
-export async function validateMarkdown(
-	root: AST.Node,
-	options: ParserOptions
-): Promise<void> {
-	await processMarkdown(root, options, true);
-}
-
-/**
- * Validates and, unless only validation is requested, formats the raw HTML in a
- * Markdown syntax tree.
- */
-async function processMarkdown(
-	root: AST.Node,
 	options: ParserOptions,
-	isValidationOnly: boolean
+	print?: (
+		root: AST.RootNode,
+		sentinels: ReadonlyMap<AST.Node, string>
+	) => Promise<string>
 ): Promise<AST.Node> {
 	if (!isRootNode(root)) {
 		return root;
 	}
 
-	const context = renderDocumentContext(root, {
-		filepath: options.filepath,
-		parserName: options.parser === 'remark' ? 'remark' : 'markdown',
-		source: options.originalText,
-	});
-
+	const decisions = await decideRegions(root, options);
 	const { activeIgnoreComments, ignoredNodes } = collectIgnoredNodes(root);
-	const isIgnored = createIgnoreCheck(ignoredNodes);
+	const snapshots = snapshotNodes(root);
 
-	// Without raw HTML, only raw HTML that Prettier’s formatting adds is in the
-	// plugin’s scope
-	if (context.fragments.length === 0) {
-		if (!isValidationOnly) {
-			await checkReferenceReadings(
-				context,
-				[],
-				new Map(),
-				isIgnored,
-				options
+	// Each failed attempt rejects at least one more region
+	for (;;) {
+		try {
+			await layOutDocument(root, {
+				activeIgnoreComments,
+				decisions,
+				ignoredNodes,
+				options,
+			});
+
+			// Without fragments, no role can change
+			const changes =
+				print && decisions.documentRegions.document.fragments.length > 0
+					? await checkRoles(root, decisions, options, print)
+					: [];
+
+			if (changes.length > 0) {
+				throw new RegionLayoutError(undefined, changes);
+			}
+
+			break;
+		} catch (error: unknown) {
+			const { problems } = decisions;
+
+			// A failure that no accepted region can explain isn’t an HTML problem
+			if (!(error instanceof RegionLayoutError)) {
+				throw error;
+			}
+
+			restoreNodes(snapshots);
+
+			// One that rejects no further region would fail again the same way,
+			// so the remaining accepted regions are rejected with it
+			const isRepeated = error.rejections.every(({ region }) =>
+				problems.has(region)
 			);
+			const rejections = isRepeated
+				? listRegions(decisions)
+						.filter((region) => !problems.has(region))
+						.map((region) => ({
+							region,
+							problem: {
+								...error.rejections[0]!.problem,
+								position: region.position,
+							},
+						}))
+				: error.rejections;
 
-			// Formatting can expose markup in a fence as raw HTML
-			checkFenceFormatting(root, options, isIgnored);
+			if (rejections.length === 0) {
+				break;
+			}
+
+			for (const { problem, region } of rejections) {
+				problems.set(region, problem);
+			}
+		}
+	}
+
+	reportNotices(listNotices(decisions), options);
+
+	return root;
+}
+
+/**
+ * Checks that inline HTML stays inline, blocks keep their layout, and ignore
+ * directives still protect the same targets after a trial print.
+ */
+async function checkRoles(
+	root: AST.RootNode,
+	decisions: RegionDecisions,
+	options: ParserOptions,
+	print: (
+		root: AST.RootNode,
+		sentinels: ReadonlyMap<AST.Node, string>
+	) => Promise<string>
+): Promise<Array<{ problem: Rejection; region: Regions.Region }>> {
+	// Characters that something other than a sentinel printed
+	const excluded = new Set<string>();
+	let printed: ReturnType<typeof locateRoleSentinels>;
+
+	// Each ambiguous trial print excludes at least one more character
+	for (;;) {
+		const sentinels = createRoleSentinels(decisions, excluded);
+
+		// Without sentinels, the role check can’t locate any fragment, so every
+		// region it would check falls back to plain Prettier. The trial print
+		// still runs, so an error that Prettier raises comes first
+		if (sentinels.size === 0) {
+			await print(root, sentinels);
+
+			return listUnmarkableRegions(decisions);
 		}
 
-		return root;
+		printed = locateRoleSentinels(await print(root, sentinels), sentinels);
+
+		if (printed.ambiguous.size === 0) {
+			break;
+		}
+
+		for (const character of printed.ambiguous) {
+			excluded.add(character);
+		}
 	}
 
-	const analysis = await analyzeDocumentContext(context, options);
+	const formattedRoot = (await markdownParsers[
+		options.parser === 'remark' ? 'remark' : 'markdown'
+	].parse(printed.text, { originalText: '' } as ParserOptions)) as AST.Node;
+	const changedBlocks = findChangedBlocks(decisions, formattedRoot, printed);
 
-	// These checks compare the affected constructs before and after Prettier’s
-	// Markdown formatting
-	if (!isValidationOnly) {
-		await checkReferenceReadings(
-			context,
-			analysis.protectedRanges,
-			analysis.readingContainers,
-			isIgnored,
-			options
-		);
-		await checkProtectedMarkdown(
-			analysis.protectedMarkdown,
-			isIgnored,
-			options
-		);
-		await checkSplitElements(analysis.splitElements, ignoredNodes, options);
-		checkFenceFormatting(root, options, isIgnored);
+	// A changed block can take in later fragments, which get another check
+	// once the block is rejected
+	if (changedBlocks.length > 0) {
+		return changedBlocks;
 	}
 
+	return [
+		...findChangedRoles(decisions, formattedRoot, printed.offsets),
+		// An ignore comment that formatting moves to a line of its own can
+		// protect different HTML on the next pass
+		...(await findMovedIgnoreComments(decisions, formattedRoot, printed)),
+	];
+}
+
+/**
+ * Formats the raw HTML of the regions that aren’t rejected.
+ */
+async function layOutDocument(
+	root: AST.RootNode,
+	{
+		activeIgnoreComments,
+		decisions,
+		ignoredNodes,
+		options,
+	}: Pick<
+		ScopeState,
+		'activeIgnoreComments' | 'decisions' | 'ignoredNodes' | 'options'
+	>
+): Promise<void> {
+	const rejectedNodes = listRejectedNodes(decisions);
+
+	applyClosingTagCorrections(root, decisions, rejectedNodes);
+
+	const accepted = decisions.documentRegions.document.fragments.filter(
+		({ node }) =>
+			!rejectedNodes.has(node) && !decisions.removedNodes.has(node)
+	);
 	const state: ScopeState = {
 		activeIgnoreComments,
-		analysis,
 		blockFragments: new Set(
-			context.fragments
-				.filter(({ isBlock }) => isBlock)
-				.map(({ node }) => node)
+			accepted.filter(({ isBlock }) => isBlock).map(({ node }) => node)
 		),
-		fragments: new Set(context.fragments.map(({ node }) => node)),
+		decisions,
+		fragments: new Set(accepted.map(({ node }) => node)),
 		ignoredNodes,
-		isValidationOnly,
 		options,
 		paragraphEdges: new Map(),
 	};
@@ -156,74 +273,121 @@ async function processMarkdown(
 			endsOpenBlocks: true,
 			isListItem: false,
 			isPrintedTight: false,
-			isTight: false,
 			prefixWidth: 0,
 		},
 		state
 	);
+	alignListItemHTML(root);
 
-	if (isValidationOnly) {
-		return root;
-	}
+	const parents = indexParents(root);
 
-	for (const fragments of groupInlineFragments(context, ignoredNodes)) {
-		await formatInlineHTML(
-			fragments,
-			getInlineLayout(fragments[0]!, context, state),
-			analysis.protectedStarts,
-			options,
-			formattedHTMLNodes
-		);
-	}
+	for (const region of listRegions(decisions)) {
+		if (region.kind !== 'inline' || isRejected(decisions, region)) {
+			continue;
+		}
 
-	return root;
-}
+		const fragments = region.fragments
+			.filter(
+				({ node }) =>
+					!ignoredNodes.has(node) && !decisions.removedNodes.has(node)
+			)
+			.map((fragment) => toInlineFragment(fragment, parents));
+		const layout = getInlineLayout(region, state);
 
-/**
- * Reports an error when formatting would give an element split across fragments
- * different opening and closing tag names. Ignored tags keep their source
- * spelling. HTML blocks use the name parsed in context, while inline tags are
- * formatted on their own. The skeleton checks elements with both tags in HTML
- * blocks.
- */
-async function checkSplitElements(
-	splitElements: ReadonlyArray<AST.SplitElement>,
-	ignoredNodes: ReadonlySet<AST.Node>,
-	options: ParserOptions
-): Promise<void> {
-	for (const element of splitElements) {
-		const getPrintedName = async (
-			{ isBlock, node }: AST.Fragment,
-			isClosingTag: boolean
-		): Promise<string> => {
-			if (ignoredNodes.has(node)) {
-				return element.sourceName;
-			}
-
-			return isBlock
-				? element.name
-				: formatInlineTagName(
-						element.sourceName,
-						isClosingTag,
-						options,
-						node.position?.start
-					);
-		};
-
-		if (
-			(await getPrintedName(element.opening, false)) !==
-			(await getPrintedName(element.closing, true))
-		) {
-			reportChangedTagSpelling(element.sourceName, {
-				filepath: options.filepath,
-				position: element.opening.node.position?.start,
-			});
+		try {
+			await formatInlineHTML(
+				fragments,
+				layout,
+				options,
+				formattedHTMLNodes
+			);
+		} catch (error: unknown) {
+			throw new RegionLayoutError(error, [
+				{ region, problem: describeLayoutFailure(error, region) },
+			]);
 		}
 	}
 }
 
 /**
- * Formats the HTML blocks of a container and of the containers nested in it.
+ * Applies closing tag corrections to accepted regions and removes inline nodes
+ * they leave empty.
+ */
+function applyClosingTagCorrections(
+	root: AST.RootNode,
+	decisions: RegionDecisions,
+	rejectedNodes: ReadonlySet<AST.Node>
+): void {
+	const { closingTags } = decisions.documentRegions.corrections;
+	const parents = indexParents(root);
+
+	decisions.removedNodes.clear();
+
+	for (const fragment of decisions.documentRegions.document.fragments) {
+		const { node } = fragment;
+		const tags = fragment.tokens.filter(
+			(token): token is Regions.ClosingTag =>
+				token.kind === 'closing-tag' && closingTags?.has(token) === true
+		);
+
+		if (tags.length === 0 || rejectedNodes.has(node)) {
+			continue;
+		}
+
+		const value = replaceClosingTags(node.value, tags, closingTags!);
+
+		if (value.trim() !== '') {
+			node.value = value;
+			continue;
+		}
+
+		removeHTMLNode(node, parents.get(node)!);
+		decisions.removedNodes.add(node);
+	}
+}
+
+/**
+ * Replaces corrected closing tags in a fragment’s HTML.
+ */
+function replaceClosingTags(
+	value: string,
+	tags: ReadonlyArray<Regions.ClosingTag>,
+	closingTags: ReadonlyMap<Regions.ClosingTag, string>
+): string {
+	let corrected = '';
+	let offset = 0;
+
+	for (const tag of tags) {
+		corrected += value.slice(offset, tag.start) + closingTags.get(tag)!;
+		offset = tag.end;
+	}
+
+	return corrected + value.slice(offset);
+}
+
+/**
+ * Describes why a region’s formatting or layout failed. The error’s own location
+ * in the original Markdown applies when it lies in the region.
+ */
+function describeLayoutFailure(
+	error: unknown,
+	region: Regions.Region
+): Rejection {
+	const location = (error as { loc?: { start?: AST.Point } }).loc?.start;
+	const position =
+		location && findRegionAt([region], location)
+			? { column: location.column, line: location.line }
+			: region.position;
+
+	return isFormatterFailure(error)
+		? { cause: error.cause, kind: 'unformattable', position }
+		: { cause: error, kind: 'unsafe-layout', position };
+}
+
+/**
+ * Formats HTML blocks in this container and its descendants. A failure rejects
+ * the responsible region if it can be identified. Otherwise it rejects all
+ * accepted regions in the affected scope.
  */
 async function formatScopes(
 	container: AST.ParentNode,
@@ -231,18 +395,11 @@ async function formatScopes(
 	state: ScopeState,
 	nestingIndentation = 0
 ): Promise<void> {
-	const {
-		activeIgnoreComments,
-		analysis,
-		blockFragments,
-		ignoredNodes,
-		options,
-	} = state;
+	const { activeIgnoreComments, blockFragments, ignoredNodes, options } =
+		state;
 
 	for (const [index, child] of container.children.entries()) {
-		// Tags rendered inside opaque HTML tokens belong to the token’s content
-		// and aren’t formatted separately
-		if (!isParentNode(child) || analysis.opaqueContainers.has(child)) {
+		if (!isParentNode(child)) {
 			continue;
 		}
 
@@ -261,11 +418,10 @@ async function formatScopes(
 			await formatScopes(
 				child,
 				{
-					ancestors: analysis.rawAncestorsByContainer.get(child)!,
+					ancestors: listContainerAncestors(state.decisions, child),
 					endsOpenBlocks: layout.endsOpenBlocks,
 					isListItem: false,
 					isPrintedTight: false,
-					isTight: false,
 					prefixWidth:
 						layout.prefixWidth +
 						(index > 0 ? nestingIndentation : 0) +
@@ -291,31 +447,102 @@ async function formatScopes(
 		return;
 	}
 
-	if (state.isValidationOnly) {
-		checkSourceBlocks(
-			{ blockFragments, children: container.children, ignoredNodes },
+	// After a nested list that starts an item, the item’s HTML blocks print at
+	// the nested list’s indentation
+	const blockLayout =
+		layout.isListItem && container.children[0]?.type === 'list'
+			? {
+					...layout,
+					prefixWidth: layout.prefixWidth + nestingIndentation,
+				}
+			: layout;
+
+	try {
+		container.children = await formatBlockHTML(
+			{
+				...blockLayout,
+				activeIgnoreComments,
+				blockFragments,
+				children: container.children,
+				formattedNodes: formattedHTMLNodes,
+				ignoredNodes,
+			},
 			options
 		);
-		return;
+	} catch (error: unknown) {
+		throw new RegionLayoutError(
+			error,
+			await attributeFailure(
+				error,
+				container,
+				state,
+				getScopeOptions(blockLayout, options)
+			)
+		);
+	}
+}
+
+/**
+ * Locates the accepted region responsible for a layout failure. Falls back to
+ * the scope’s outermost accepted regions when the failure cannot be located.
+ */
+async function attributeFailure(
+	error: unknown,
+	scope: AST.Node,
+	state: ScopeState,
+	options: ParserOptions = state.options
+): Promise<Array<{ problem: Rejection; region: Regions.Region }>> {
+	const { decisions } = state;
+	const regions = listRegions(decisions).filter(
+		(region) => isWithin(region, scope) && !isRejected(decisions, region)
+	);
+	const outerRegions = regions.filter(
+		({ parent }) => !parent || !regions.includes(parent)
+	);
+
+	if (isFormatterFailure(error)) {
+		const diagnosis = await diagnoseFormatting(regions, decisions, options);
+
+		if (diagnosis) {
+			return [diagnosis];
+		}
+	} else {
+		const location = (error as { loc?: { start?: AST.Point } }).loc?.start;
+		const region = location && findRegionAt(outerRegions, location);
+
+		/* v8 ignore else -- @preserve */
+		if (region) {
+			return [{ region, problem: describeLayoutFailure(error, region) }];
+		}
 	}
 
-	container.children = await formatBlockHTML(
-		{
-			...layout,
-			activeIgnoreComments,
-			blockFragments,
-			children: container.children,
-			formattedNodes: formattedHTMLNodes,
-			ignoredNodes,
-			inlineClosingTags: analysis.inlineClosingTagsByFragment,
-			inlineOpeners: analysis.inlineOpenersByFragment,
-			protectedEnds: analysis.protectedEnds,
-			protectedStarts: analysis.protectedStarts,
-			trailingInlineClosingTags:
-				analysis.inlineClosingTagsByContainer.get(container) ?? [],
-		},
-		options
-	);
+	// A failure that names no accepted region rejects them all, so the next
+	// attempt doesn’t fail the same way
+	/* v8 ignore next -- @preserve */
+	return outerRegions.map((region) => ({
+		region,
+		problem: describeLayoutFailure(error, region),
+	}));
+}
+
+/**
+ * Checks whether a region lies in a container or list, at any depth.
+ */
+function isWithin(region: Regions.Region, scope: AST.Node): boolean {
+	for (
+		let container: Regions.Container | undefined = region.container;
+		container;
+		container = container.parent
+	) {
+		if (
+			container.node === scope ||
+			scope.children?.includes(container.node)
+		) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /**
@@ -329,53 +556,133 @@ function getCheckboxWidth(container: AST.Node): number {
 }
 
 /**
- * Groups the inline fragments that formatting reaches by the paragraph,
- * heading, or table cell around them, in document order. Their layouts depend
- * on one another within a paragraph.
- */
-function groupInlineFragments(
-	context: AST.DocumentContext,
-	ignoredNodes: ReadonlySet<AST.Node>
-): AST.Fragment[][] {
-	const groups = new Map<AST.Node, AST.Fragment[]>();
-
-	for (const fragment of context.fragments) {
-		if (fragment.isBlock || ignoredNodes.has(fragment.node)) {
-			continue;
-		}
-
-		const key = fragment.block ?? fragment.node;
-		const group = groups.get(key);
-
-		if (group) {
-			group.push(fragment);
-		} else {
-			groups.set(key, [fragment]);
-		}
-	}
-
-	return [...groups.values()];
-}
-
-/**
- * Returns the layout of the paragraph around an inline fragment, if formatting
- * reached that paragraph.
+ * Returns the layout of a paragraph, heading, or table cell with inline HTML,
+ * if formatting reached it.
  */
 function getInlineLayout(
-	fragment: AST.Fragment,
-	context: AST.DocumentContext,
+	region: Regions.InlineRegion,
 	state: ScopeState
 ): AST.InlineLayout | undefined {
-	const paragraph = fragment.block;
-	const edges = paragraph && state.paragraphEdges.get(paragraph);
+	const edges = state.paragraphEdges.get(region.node);
+	const containers: AST.Node[] = [];
+
+	for (
+		let container: Regions.Container | undefined = region.container;
+		container?.parent;
+		container = container.parent
+	) {
+		containers.unshift(container.node);
+	}
 
 	return edges
 		? {
 				...edges,
-				containers: context.enclosingContainers.get(paragraph)!,
-				paragraph,
+				containers,
+				paragraph: region.node,
+				removedNodes: region.fragments
+					.filter(({ node }) =>
+						state.decisions.removedNodes.has(node)
+					)
+					.map(({ node }) => node),
 			}
 		: undefined;
+}
+
+/**
+ * Identifies the inline node’s parent and whether its tag must fit on one line.
+ */
+function toInlineFragment(
+	fragment: Regions.Fragment,
+	parents: ReadonlyMap<AST.Node, AST.Node>
+): AST.Fragment {
+	const block = fragment.block!;
+
+	return {
+		isSingleLine: block.type === 'heading' || block.type === 'tableCell',
+		node: fragment.node,
+		parent: parents.get(fragment.node)!,
+	};
+}
+
+/**
+ * Maps each node of a syntax tree to its parent.
+ */
+function indexParents(root: AST.Node): Map<AST.Node, AST.Node> {
+	const parents = new Map<AST.Node, AST.Node>();
+	const pending = [root];
+
+	for (const node of pending) {
+		for (const child of node.children ?? []) {
+			parents.set(child, node);
+			pending.push(child);
+		}
+	}
+
+	return parents;
+}
+
+/**
+ * Saves each node’s own properties so a failed layout can be retried.
+ */
+function snapshotNodes(root: AST.Node): NodeSnapshot[] {
+	const snapshots: NodeSnapshot[] = [];
+	const pending = [root];
+
+	for (const node of pending) {
+		snapshots.push({ node, properties: { ...node } });
+		pending.push(...(node.children ?? []));
+	}
+
+	return snapshots;
+}
+
+/**
+ * Aligns a formatted HTML block with the first child of a two-child list item
+ * so Prettier preserves the item’s indentation.
+ */
+function alignListItemHTML(node: AST.Node): void {
+	const children = node.children ?? [];
+	const [first, second] = children;
+
+	if (
+		node.type === 'listItem' &&
+		children.length === 2 &&
+		second?.position &&
+		formattedHTMLNodes.has(second) &&
+		first?.position
+	) {
+		second.position = {
+			...second.position,
+			start: {
+				...second.position.start,
+				column: first.position.start.column,
+			},
+		};
+	}
+
+	for (const child of children) {
+		alignListItemHTML(child);
+	}
+}
+
+/**
+ * Restores the nodes of a syntax tree to their recorded properties, and forgets
+ * what the failed layout recorded for them.
+ */
+function restoreNodes(snapshots: ReadonlyArray<NodeSnapshot>): void {
+	for (const { node, properties } of snapshots) {
+		for (const key of Object.keys(node)) {
+			// Formatting adds no properties at present, but one it added would
+			// otherwise carry into the next attempt
+			/* v8 ignore next -- @preserve */
+			if (!Object.hasOwn(properties, key)) {
+				Reflect.deleteProperty(node, key);
+			}
+		}
+
+		Object.assign(node, properties);
+		formattedHTMLNodes.delete(node);
+	}
 }
 
 /**
@@ -386,45 +693,26 @@ async function formatListScopes(
 	prefixWidth: number,
 	state: ScopeState
 ): Promise<void> {
-	const isTight = !isLooseList(list, state.options.originalText);
-
-	// Prettier’s printer uses each item’s `spread` flag to insert blank lines
-	// within and between items. Its reading of looseness can differ from the
-	// reference renderer’s, so lists containing raw HTML use flags based on the
-	// reference renderer’s blank line rules to preserve the HTML’s context.
-	// Prettier prints ignored lists from their source
-	const separations =
-		!state.isValidationOnly &&
-		!state.ignoredNodes.has(list) &&
-		containsFragment(list, state.fragments)
-			? list.children.map((item, index) =>
-					isSeparatedFromNext(
-						item,
-						list.children[index + 1],
-						state.options.originalText
-					)
-				)
-			: undefined;
-
 	for (const [index, item] of list.children.entries()) {
-		if (!isParentNode(item) || state.analysis.opaqueContainers.has(item)) {
+		if (!isParentNode(item)) {
 			continue;
 		}
 
 		const markerWidth = getListMarkerWidth(list, index, state.options);
+		const isPrintedTight = !isPrintedLooseItem(
+			item,
+			list.children[index + 1]
+		);
 
 		// A blank line after a list item’s content doesn’t necessarily end the
 		// item, so an HTML block can remain open past that content
 		await formatScopes(
 			item,
 			{
-				ancestors: state.analysis.rawAncestorsByContainer.get(item)!,
+				ancestors: listContainerAncestors(state.decisions, item),
 				endsOpenBlocks: false,
 				isListItem: true,
-				// When `separations` is undefined, the list is ignored or
-				// contains no raw HTML
-				isPrintedTight: separations?.[index] === false,
-				isTight,
+				isPrintedTight,
 				prefixWidth: prefixWidth + markerWidth,
 			},
 			state,
@@ -433,102 +721,23 @@ async function formatListScopes(
 			// `tabWidth - markerWidth`, clamped to zero through three columns
 			Math.min(Math.max(state.options.tabWidth - markerWidth, 0), 3)
 		);
-
-		if (separations) {
-			(item as { spread?: boolean }).spread = separations[index];
-
-			const nextItem = list.children[index + 1];
-
-			if (!separations[index]) {
-				checkDefinitionTitles(item, state.options);
-			}
-
-			if (!separations[index] && nextItem) {
-				endBeforeNextItem(item, nextItem, state.options.originalText);
-			}
-		}
 	}
 }
 
 /**
- * Reports an error when printing a tight list item could turn a paragraph or
- * heading into the preceding link reference definition’s title by removing the
- * blank line between them.
+ * Checks whether Prettier’s Markdown printer prints a list item loose, with
+ * blank lines between its children and after it.
  */
-function checkDefinitionTitles(
-	item: AST.ParentNode,
-	options: ParserOptions
-): void {
-	const { children } = item;
-
-	for (const [index, child] of children.entries()) {
-		const next = children[index + 1];
-		const end = child.position?.end.offset;
-		const nextStart = next?.position?.start.offset;
-
-		if (
-			child.type === 'definition' &&
-			(next?.type === 'heading' || next?.type === 'paragraph') &&
-			end !== undefined &&
-			nextStart !== undefined &&
-			/\n[\t >]*\n/.test(options.originalText.slice(end, nextStart)) &&
-			/^["'(]/.test(options.originalText.slice(nextStart))
-		) {
-			reportUnsafeLayout({
-				filepath: options.filepath,
-				position: next.position?.start,
-				reason: `Formatting would remove the blank line before this ${next.type}, which GitHub Flavored Markdown could then read as the preceding link reference definition’s title`,
-			});
-		}
-	}
-}
-
-/**
- * Moves a tight list item’s end position to the line break before the next
- * item. Outside MDX, Prettier’s printer treats an item as loose when its end
- * line is more than one line above the next item’s start line, even when the
- * reference renderer ignores the blank line after a thematic break.
- */
-function endBeforeNextItem(
+function isPrintedLooseItem(
 	item: AST.Node,
-	nextItem: AST.Node,
-	source: string
-): void {
-	const { position } = item;
-	const nextStart = nextItem.position?.start;
-
-	if (!position || nextStart?.offset === undefined) {
-		return;
-	}
-
-	const end = source.lastIndexOf('\n', nextStart.offset - 1);
-
-	/* v8 ignore next -- @preserve */
-	const itemEnd = position.end.offset ?? 0;
-
-	if (end < itemEnd) {
-		return;
-	}
-
-	item.position = {
-		...position,
-		end: {
-			column: end - source.lastIndexOf('\n', end - 1),
-			line: nextStart.line - 1,
-			offset: end,
-		},
-	};
-}
-
-/**
- * Checks whether a node contains a raw HTML fragment.
- */
-function containsFragment(
-	node: AST.Node,
-	fragments: ReadonlySet<AST.Node>
+	next: AST.Node | undefined
 ): boolean {
-	return (node.children ?? []).some(
-		(child) => fragments.has(child) || containsFragment(child, fragments)
+	const end = item.position?.end.line;
+	const nextStart = next?.position?.start.line;
+
+	return (
+		(item as { spread?: boolean }).spread === true ||
+		(end !== undefined && nextStart !== undefined && end + 1 < nextStart)
 	);
 }
 
@@ -642,9 +851,8 @@ function collectIgnoredNodes(root: AST.RootNode): {
 }
 
 /**
- * Returns the kind of Prettier ignore comment that a node holds: `next` for a
- * comment that ignores the next node, or `start` or `end` for a comment that
- * bounds an ignored range. Returns `undefined` for other nodes.
+ * Identifies a Prettier ignore comment as `next`, `start`, or `end`. Returns
+ * `undefined` for other nodes.
  */
 function getIgnoreCommentKind(
 	node: AST.Node
@@ -659,35 +867,6 @@ function getIgnoreCommentKind(
 	}
 
 	return (match[1] as 'end' | 'start' | undefined) ?? 'next';
-}
-
-/**
- * Creates a check for whether ignore comments protect a node’s source, which
- * also covers nodes reparsed from that source.
- */
-function createIgnoreCheck(
-	ignoredNodes: ReadonlySet<AST.Node>
-): (node: AST.Node) => boolean {
-	const ranges = [...ignoredNodes].flatMap(({ position }) =>
-		position?.start.offset === undefined ||
-		position.end.offset === undefined
-			? []
-			: [{ end: position.end.offset, start: position.start.offset }]
-	);
-
-	return (node) => {
-		const start = node.position?.start.offset;
-		const end = node.position?.end.offset;
-
-		return (
-			ignoredNodes.has(node) ||
-			(start !== undefined &&
-				end !== undefined &&
-				ranges.some(
-					(range) => range.start <= start && end <= range.end
-				))
-		);
-	};
 }
 
 /**

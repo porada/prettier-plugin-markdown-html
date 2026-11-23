@@ -1,38 +1,40 @@
-import type { Parser, ParserOptions, Plugin, Printer } from 'prettier';
+import type { AstPath, Parser, ParserOptions, Plugin, Printer } from 'prettier';
 import type { AST, ParserName, PluginOptions } from './types/index.d.ts';
+import * as prettier from 'prettier';
 import { doc } from 'prettier';
 import * as pluginHTML from 'prettier/plugins/html';
 import * as pluginMarkdown from 'prettier/plugins/markdown';
+import { omitParserOptions } from './format-html/index.ts';
 import {
 	callParserWithCompatibility,
 	createPriorParserResolver,
 	createPriorPrinterResolver,
 	markParserAsOwn,
 	markPrinterAsOwn,
+	selectsPrinter,
+	withoutOwnHooks,
 	withPriorParserOptions,
 	withPriorPrinterOptions,
 } from './plugin-hooks/index.ts';
 import preprocessMarkdown, {
 	formattedHTMLNodes,
-	validateMarkdown,
 } from './preprocess-markdown/index.ts';
-import printMarkdown, {
-	alignListItemHTML,
-	printPrettierIgnored,
-} from './print-markdown/index.ts';
 
 const htmlOptions = (pluginHTML as Plugin).options!;
 const markdownOptions = (pluginMarkdown as Plugin).options!;
 const { parsers: markdownParsers, printers: markdownPrinters } = pluginMarkdown;
 
+// The source and parser of Markdown embedded in another document, by the empty
+// syntax tree that stands in for it
+const embeddedTexts = new WeakMap<
+	AST.Node,
+	{ parserName: ParserName; text: string }
+>();
+
 const priorParserResolverByName = new Map<
 	ParserName,
 	ReturnType<typeof createPriorParserResolver>
 >();
-
-// Text lengths before parser preprocessing, matching Prettier’s range
-// comparison
-const sourceLengths = new WeakMap<ParserOptions, number>();
 
 /**
  * Creates a parser that defers to the prior compatible parser before Prettier’s
@@ -45,9 +47,28 @@ function createParser(name: ParserName): Parser {
 		text: string,
 		options: ParserOptions
 	): Promise<unknown> {
+		// Markdown embedded in another document leaves this plugin out, so
+		// plain Prettier parses and prints it, with whatever syntax tree its
+		// parser produces
+		if (replaysEmbedded(options, name)) {
+			const root: AST.Node = {
+				children: [],
+				position: {
+					end: { column: 1, line: 1, offset: text.length },
+					start: { column: 1, line: 1, offset: 0 },
+				},
+				type: 'root',
+			};
+
+			embeddedTexts.set(root, { parserName: name, text });
+			return root;
+		}
+
 		const priorParser = await resolvePriorParser(options, 'parse');
 
-		const ast = await (priorParser
+		// Prettier skips printer preprocessing for a partial Markdown range, so
+		// plain Prettier supplies that result
+		return priorParser
 			? withPriorParserOptions(options, priorParser, (delegatedOptions) =>
 					callParserWithCompatibility(
 						priorParser.parser,
@@ -55,28 +76,17 @@ function createParser(name: ParserName): Parser {
 						delegatedOptions
 					)
 				)
-			: callParserWithCompatibility(nativeParser, text, options));
-
-		// Prettier skips printer preprocessing for a partial Markdown range, so
-		// validation runs during parsing
-		if (
-			options.rangeStart > 0 ||
-			options.rangeEnd < (sourceLengths.get(options) ?? text.length)
-		) {
-			await validateMarkdown(
-				await prepareRoot(ast as AST.Node, options),
-				options
-			);
-		}
-
-		return ast;
+			: callParserWithCompatibility(nativeParser, text, options);
 	}
 
 	const preprocess: NonNullable<Parser['preprocess']> = async (
 		text: string,
 		options: ParserOptions
 	) => {
-		sourceLengths.set(options, text.length);
+		// Plain Prettier preprocesses Markdown embedded in another document
+		if (replaysEmbedded(options, name)) {
+			return text;
+		}
 
 		const priorParser = await resolvePriorParser(options, 'preprocess');
 		const priorPreprocess = priorParser?.parser.preprocess;
@@ -168,32 +178,153 @@ async function prepareRoot(
 const mdastPrinter: Printer<AST.Node> = {
 	...markdownPrinters.mdast,
 
-	async preprocess(ast, options) {
-		// Analysis and error positions use the source columns
-		const root = await preprocessMarkdown(
-			await prepareRoot(ast, options),
-			options
-		);
-		alignListItemHTML(root);
-		return root;
+	embed(path: AstPath<AST.Node>, options) {
+		const embedded = embeddedTexts.get(path.node);
+
+		if (!embedded) {
+			return markdownPrinters.mdast.embed!(path, options);
+		}
+
+		const plugins = options.plugins!.map(
+			withoutOwnHooks
+		) as ParserOptions['plugins'];
+
+		return async (textToDoc) => {
+			const { parser } = options;
+			let replayed: ReturnType<typeof textToDoc>;
+
+			// Prettier reads the parent parser from these options at the start
+			// of replay. That parser must embed the Markdown again
+			options.parser = options.parentParser!;
+
+			try {
+				replayed = textToDoc(embedded.text, {
+					parser: embedded.parserName,
+					plugins,
+				});
+			} finally {
+				options.parser = parser;
+			}
+
+			return replayed;
+		};
 	},
 
-	printPrettierIgnored,
+	async preprocess(ast, options) {
+		if (embeddedTexts.has(ast)) {
+			return ast;
+		}
+
+		const prepared = await prepareRoot(ast, options);
+
+		if (isEmbedded(options)) {
+			return prepared;
+		}
+
+		// Analysis and notice positions use the source columns
+		return preprocessMarkdown(
+			prepared,
+			options,
+			async (laidOut, sentinels) =>
+				printTrial(laidOut, options, sentinels)
+		);
+	},
 
 	print(path, options, print, args) {
-		const printed = printMarkdown(path, options, print, args);
+		const printed = markdownPrinters.mdast.print(
+			path,
+			options,
+			print,
+			args
+		);
 
-		if (!formattedHTMLNodes.has(path.node)) {
+		if (isEmbedded(options) || !formattedHTMLNodes.has(path.node)) {
 			return printed;
 		}
 
 		// Empty literal lines inherit container padding. Trim that padding
 		// without removing whitespace from nonempty HTML lines
-		return doc.utils.mapDoc(printed, (part) =>
-			part === '' ? doc.builders.trim : part
+		return doc.utils.mapDoc(printed, (region) =>
+			region === '' ? doc.builders.trim : region
 		);
 	},
 };
+
+/**
+ * Checks whether Prettier formats the Markdown inside another document, as it
+ * does for a fenced code block of Markdown. The plugin leaves such Markdown to
+ * plain Prettier and acts only on the top-level document.
+ */
+function isEmbedded(options: ParserOptions): boolean {
+	return options.parentParser !== undefined;
+}
+
+/**
+ * Checks whether this printer will replay a placeholder’s embedded Markdown.
+ */
+function replaysEmbedded(options: ParserOptions, name: ParserName): boolean {
+	return (
+		isEmbedded(options) &&
+		selectsPrinter(
+			options,
+			typeof options.parser === 'string'
+				? options.parser
+				: /* v8 ignore next -- @preserve */ name,
+			mdastPrinter
+		)
+	);
+}
+
+/**
+ * Prints a laid-out syntax tree as this formatting operation would, without
+ * preprocessing it again.
+ */
+async function printTrial(
+	root: AST.Node,
+	options: ParserOptions,
+	sentinels: ReadonlyMap<AST.Node, string>
+): Promise<string> {
+	const { __debug } = prettier as unknown as {
+		__debug: {
+			formatAST: (
+				ast: unknown,
+				options: unknown
+			) => Promise<{ formatted: string }>;
+		};
+	};
+	const trialPrinter: Printer<AST.Node> = {
+		...mdastPrinter,
+		preprocess: undefined,
+		// A sentinel before a fragment locates it in the printed text
+		print(path, printOptions, print, args) {
+			const printed = mdastPrinter.print(path, printOptions, print, args);
+			const sentinel = sentinels.get(path.node);
+
+			return sentinel === undefined ? printed : [sentinel, printed];
+		},
+	};
+	const trialPlugin: Plugin = {
+		parsers: {
+			markdown: markdownParsers.markdown,
+			remark: markdownParsers.remark,
+		},
+		printers: { mdast: trialPrinter },
+	};
+
+	const { formatted } = await __debug.formatAST(root, {
+		...omitParserOptions(options),
+		originalText: options.originalText,
+		parser: options.parser,
+		plugins: [...options.plugins, trialPlugin],
+	});
+
+	// The role check reparses the result, which needs line feeds
+	return formatted.replaceAll(/\r\n?/g, '\n');
+}
+
+/**
+ * Finds the prior Markdown printer whose preprocessing this plugin can use.
+ */
 const resolvePriorPrinter = createPriorPrinterResolver(
 	mdastPrinter,
 	async (options) => {
@@ -223,13 +354,12 @@ export const options: Plugin['options'] = {
 	htmlFragmentBracketSameLine: {
 		category: 'Markdown HTML',
 		description:
-			'Keep the closing bracket on the last attribute line in raw HTML fragments in Markdown.',
+			'Keep the closing bracket on the last attribute line in raw HTML fragments.',
 		type: 'boolean',
 	},
 	htmlFragmentEmbeddedLanguageFormatting: {
 		category: 'Markdown HTML',
-		description:
-			'Control formatting of `<script>` and `<style>` contents in raw HTML fragments in Markdown.',
+		description: 'Format embedded code in raw HTML fragments.',
 		type: 'choice',
 		choices: [
 			{
@@ -237,39 +367,36 @@ export const options: Plugin['options'] = {
 				value: 'auto',
 			},
 			{
-				description: 'Never format embedded code.',
+				description: 'Leave embedded code as written.',
 				value: 'off',
 			},
 		],
 	},
 	htmlFragmentPrintWidth: {
 		category: 'Markdown HTML',
-		description:
-			'Override the preferred line length for raw HTML fragments in Markdown.',
+		description: 'Set the preferred line length for raw HTML fragments.',
 		type: 'int',
 	},
 	htmlFragmentSingleAttributePerLine: {
 		category: 'Markdown HTML',
-		description:
-			'Enforce one HTML attribute per line for raw HTML fragments in Markdown.',
+		description: 'Use one attribute per line in raw HTML fragments.',
 		type: 'boolean',
 	},
 	htmlFragmentWhitespaceSensitivity: {
 		category: 'Markdown HTML',
-		description:
-			'Control whitespace handling for raw HTML fragments in Markdown.',
+		description: 'Set whitespace sensitivity for raw HTML fragments.',
 		type: 'choice',
 		choices: [
 			{
-				description: 'Respect CSS display property value.',
+				description: 'Follow each element’s default CSS display value.',
 				value: 'css',
 			},
 			{
-				description: 'Consider whitespace sensitive.',
+				description: 'Treat whitespace around tags as significant.',
 				value: 'strict',
 			},
 			{
-				description: 'Consider whitespace insensitive.',
+				description: 'Treat whitespace around tags as insignificant.',
 				value: 'ignore',
 			},
 		],

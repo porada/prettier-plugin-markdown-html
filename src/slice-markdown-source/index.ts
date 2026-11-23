@@ -17,10 +17,13 @@ const LIST_MARKER_PATTERN = /^(?:[*+-]|\d{1,9}[).])/;
 
 const TAB_STOP = 4;
 
+// The source of each HTML block that a document was read with, from the content
+// edge of its containers
+const htmlBlockTexts = new WeakMap<AST.Node, string>();
+
 /**
- * Returns a node’s Markdown source without the prefixes of the block quotes and
- * list items around it, outermost first, so it parses as it would at the
- * document root.
+ * Returns a node’s Markdown without container prefixes, along with its source
+ * offsets. Returns `undefined` if the node lacks a start or end offset.
  */
 export default function sliceMarkdownSource(
 	source: string,
@@ -73,19 +76,47 @@ export default function sliceMarkdownSource(
 }
 
 /**
- * Returns a node’s source without the surrounding block quote and list item
- * prefixes, read from outermost to innermost. Characters after those prefixes
- * stay unchanged, except that a tab extending beyond a prefix leaves its
- * remaining columns as spaces. With `isRelativeToNode`, later lines also lose
- * the indentation between the containers’ content edge and the node’s first
- * line.
+ * Records an HTML block’s source as `readHTMLBlockText` returns it: its lines
+ * from the content edge of the block quotes and list items around it, outermost
+ * first, with their leading whitespace as spaces covering the same columns.
  */
-export function stripContainerPrefixes(
+export function recordHTMLBlockText(
+	source: string,
+	node: AST.Node,
+	containers: ReadonlyArray<AST.Node>
+): void {
+	const lines = readLinesFromContentEdge(
+		source,
+		node,
+		containers,
+		() => Number.POSITIVE_INFINITY
+	);
+
+	if (lines) {
+		htmlBlockTexts.set(node, lines.map(({ text }) => text).join('\n'));
+	}
+}
+
+/**
+ * Reads HTML block text at its original columns so the block-start check sees
+ * the correct tab width after container prefixes. Falls back to the node’s
+ * value when no source was recorded.
+ */
+export function readHTMLBlockText(node: AST.HTMLNode): string {
+	return htmlBlockTexts.get(node) ?? node.value;
+}
+
+/**
+ * Reads a node’s source lines from the enclosing containers’ content edge.
+ * Expands only the requested indentation columns, preserving the remaining
+ * whitespace and any lazy continuation lines.
+ */
+export function readLinesFromContentEdge(
 	source: string,
 	node: AST.Node,
 	containers: ReadonlyArray<AST.Node>,
-	isRelativeToNode = false
-): string | undefined {
+	expandedColumns: (text: string, index: number) => number
+): Array<{ hasPrefixes: boolean; text: string }> | undefined {
 	const start = node.position?.start.offset;
 	const end = node.position?.end.offset;
 
@@ -93,127 +124,52 @@ export function stripContainerPrefixes(
 		return undefined;
 	}
 
-	const firstLineStart = source.lastIndexOf('\n', start - 1) + 1;
-	const firstLine = source.slice(firstLineStart, findLineEnd(source, start));
-	const indentation = isRelativeToNode
-		? measureColumns(firstLine.slice(0, start - firstLineStart)) -
-			readPrefixes(source, firstLineStart, firstLine, containers).column
-		: 0;
-	let lineStart = start;
+	let lineStart = source.lastIndexOf('\n', start - 1) + 1;
 
 	return source
-		.slice(start, end)
+		.slice(lineStart, end)
 		.split('\n')
 		.map((line, index) => {
-			const cursor =
-				index === 0
-					? undefined
-					: readPrefixes(source, lineStart, line, containers);
+			const cursor = readPrefixes(source, lineStart, line, containers);
 			lineStart += line.length + 1;
 
-			if (!cursor) {
-				return line;
+			if (!cursor.isComplete) {
+				return { hasPrefixes: false, text: line };
 			}
 
-			skipColumns(line, cursor, indentation);
-			return ' '.repeat(cursor.pending) + line.slice(cursor.index);
-		})
-		.join('\n');
-}
+			const limit = expandedColumns(line.slice(cursor.index), index);
+			let columns = cursor.pending;
+			let column = cursor.column + cursor.pending;
 
-/**
- * Checks whether a source line ends a paragraph inside the block quotes and
- * list items around a node. Container prefixes are read from outermost to
- * innermost. If a line lacks a block quote marker or sufficient list item
- * indentation, the check starts after the outer containers’ prefixes. The line
- * breaks the paragraph if only whitespace or empty block quote markers remain.
- * Otherwise, a line lacking a required prefix continues the paragraph lazily.
- */
-export function isParagraphBreak(
-	source: string,
-	lineStart: number,
-	containers: ReadonlyArray<AST.Node>
-): boolean {
-	const line = source.slice(lineStart, findLineEnd(source, lineStart));
-	const { cursor } = readCompletePrefixes(source, line, containers);
-
-	while (readQuoteMarker(line, cursor)) {
-		// Each marker of an empty block quote can follow up to three columns of
-		// indentation
-	}
-
-	return /^[\t ]*$/.test(line.slice(cursor.index));
-}
-
-/**
- * Measures the indentation of a source line after the block quote markers and
- * list item indentation that it has in full, read from outermost to
- * innermost, with tabs advancing to the next tab stop. A lazy continuation
- * line lacks a block quote marker or sufficient list item indentation, and its
- * indentation counts from the end of the outer containers’ prefixes. A blank
- * line has only spaces or tabs after those prefixes.
- */
-export function measureLineIndentation(
-	source: string,
-	lineStart: number,
-	containers: ReadonlyArray<AST.Node>
-): { indentation: number; isBlank: boolean; isLazy: boolean } {
-	const line = source.slice(lineStart, findLineEnd(source, lineStart));
-	const { cursor, isLazy } = readCompletePrefixes(source, line, containers);
-	const indentation = readIndentation(line, cursor).length;
-
-	return { indentation, isBlank: cursor.index === line.length, isLazy };
-}
-
-/**
- * Reads the block quote markers and list item indentation that a line has in
- * full, from outermost to innermost. Reading stops before the first prefix
- * that the line lacks or has only in part.
- */
-function readCompletePrefixes(
-	source: string,
-	line: string,
-	containers: ReadonlyArray<AST.Node>
-): { cursor: LineCursor; isLazy: boolean } {
-	const cursor: LineCursor = { column: 0, index: 0, pending: 0 };
-
-	for (const [index, container] of containers.entries()) {
-		if (container.type === 'blockquote' && !readQuoteMarker(line, cursor)) {
-			return { cursor, isLazy: true };
-		}
-
-		if (container.type === 'listItem') {
-			const indentation = getListItemIndentation(
-				source,
-				container,
-				containers.slice(0, index)
-			);
-			const outer = { ...cursor };
-
-			skipColumns(line, cursor, indentation);
-
-			if (cursor.column - outer.column < indentation) {
-				return { cursor: outer, isLazy: true };
+			while (
+				columns < limit &&
+				(line[cursor.index] === ' ' || line[cursor.index] === '\t')
+			) {
+				const next = advance(line[cursor.index]!, column);
+				columns += next - column;
+				column = next;
+				cursor.index += 1;
 			}
-		}
-	}
 
-	return { cursor, isLazy: false };
+			return {
+				hasPrefixes: true,
+				text: ' '.repeat(columns) + line.slice(cursor.index),
+			};
+		});
 }
 
 /**
- * Reads the prefixes that containers require at the start of a line. A list
- * item’s first line starts with its marker, and later lines with its
- * indentation. A line without a block quote’s marker continues lazily and has
- * no further prefixes.
+ * Reads the container prefixes present at the start of a line. An incomplete
+ * prefix marks a lazy continuation and leaves the remaining indentation intact.
  */
 function readPrefixes(
 	source: string,
 	lineStart: number,
 	line: string,
 	containers: ReadonlyArray<AST.Node>
-): LineCursor {
+): LineCursor & { isComplete: boolean } {
 	const cursor: LineCursor = { column: 0, index: 0, pending: 0 };
+	let isComplete = true;
 
 	for (const [index, container] of containers.entries()) {
 		/* v8 ignore next -- @preserve */
@@ -221,6 +177,7 @@ function readPrefixes(
 
 		if (container.type === 'blockquote') {
 			if (!readQuoteMarker(line, cursor)) {
+				isComplete = false;
 				break;
 			}
 		} else if (start >= lineStart && start <= lineStart + line.length) {
@@ -229,19 +186,26 @@ function readPrefixes(
 			cursor.pending = 0;
 			readListMarker(line, cursor);
 		} else {
-			skipColumns(
-				line,
-				cursor,
-				getListItemIndentation(
-					source,
-					container,
-					containers.slice(0, index)
-				)
+			const indentation = getListItemIndentation(
+				source,
+				container,
+				containers.slice(0, index)
 			);
+			const carried = { ...cursor };
+
+			skipColumns(line, cursor, indentation);
+
+			// A line without the item’s indentation continues lazily from the
+			// prefixes it carries, which its own indentation follows
+			if (cursor.column - carried.column !== indentation) {
+				Object.assign(cursor, carried);
+				isComplete = false;
+				break;
+			}
 		}
 	}
 
-	return cursor;
+	return { ...cursor, isComplete };
 }
 
 /**
@@ -256,7 +220,8 @@ function getListItemIndentation(
 	/* v8 ignore next -- @preserve */
 	const start = item.position?.start.offset ?? 0;
 	const lineStart = source.lastIndexOf('\n', start - 1) + 1;
-	const line = source.slice(lineStart, findLineEnd(source, start));
+	// Later lines follow, so a line break ends the item’s first line
+	const line = source.slice(lineStart, source.indexOf('\n', start));
 	const contentStart = readPrefixes(
 		source,
 		lineStart,
@@ -384,15 +349,6 @@ function readIndentation(line: string, cursor: LineCursor): number[] {
 	}
 
 	return indentation;
-}
-
-/**
- * Finds the line break that ends the line containing an offset. Returns
- * `undefined` on the last line, which ends with the source.
- */
-function findLineEnd(source: string, offset: number): number | undefined {
-	const lineEnd = source.indexOf('\n', offset);
-	return lineEnd === -1 ? undefined : lineEnd;
 }
 
 /**

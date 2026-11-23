@@ -79,38 +79,40 @@ In addition to Prettier’s [built-in options](https://prettier.io/docs/options)
 ```ts
 interface PluginOptions {
     /**
-     * Keep the closing bracket on the last attribute line in raw HTML
-     * fragments in Markdown. Unlike `bracketSameLine`, this option does not
-     * affect code blocks. Falls back to `bracketSameLine` when unset.
+     * Keep the closing bracket on the last attribute line in raw HTML. Inherits
+     * `bracketSameLine` when unset.
+     *
      * @default undefined
      */
     htmlFragmentBracketSameLine?: boolean | undefined;
     /**
-     * Control formatting of `<script>` and `<style>` contents in raw HTML
-     * fragments in Markdown. Unlike `embeddedLanguageFormatting`, this option
-     * does not affect code blocks. Falls back to `embeddedLanguageFormatting`
-     * when unset.
+     * Format embedded code in raw HTML. `auto` formats languages Prettier
+     * recognizes. `off` leaves embedded code as written. Inherits
+     * `embeddedLanguageFormatting` when unset.
+     *
      * @default undefined
      */
     htmlFragmentEmbeddedLanguageFormatting?: 'auto' | 'off' | undefined;
     /**
-     * Override the preferred line length for raw HTML fragments in Markdown.
-     * Unlike `printWidth`, this option does not affect code blocks or other
-     * Markdown content. Falls back to `printWidth` when unset.
+     * Set the preferred line length for raw HTML fragments. Inherits
+     * `printWidth` when unset.
+     *
      * @default undefined
      */
     htmlFragmentPrintWidth?: number | undefined;
     /**
-     * Enforce one HTML attribute per line for raw HTML fragments in Markdown.
-     * Unlike `singleAttributePerLine`, this option does not affect code blocks.
-     * Falls back to `singleAttributePerLine` when unset.
+     * Use one attribute per line in raw HTML. Inherits `singleAttributePerLine`
+     * when unset.
+     *
      * @default undefined
      */
     htmlFragmentSingleAttributePerLine?: boolean | undefined;
     /**
-     * Control whitespace handling for raw HTML fragments in Markdown. Unlike
-     * `htmlWhitespaceSensitivity`, this option does not affect code blocks.
-     * Falls back to `htmlWhitespaceSensitivity` when unset.
+     * Set whitespace sensitivity for raw HTML. `css` follows each element’s
+     * default CSS display value. `strict` treats whitespace around tags as
+     * significant. `ignore` treats it as insignificant. Inherits
+     * `htmlWhitespaceSensitivity` when unset.
+     *
      * @default undefined
      */
     htmlFragmentWhitespaceSensitivity?: 'css' | 'strict' | 'ignore' | undefined;

@@ -1,8 +1,9 @@
 import type { AST } from '../types/index.d.ts';
 import { expect, test } from 'vite-plus/test';
 import sliceMarkdownSource, {
-	measureLineIndentation,
-	stripContainerPrefixes,
+	readHTMLBlockText,
+	readLinesFromContentEdge,
+	recordHTMLBlockText,
 } from './index.ts';
 
 function createNode(type: string, start: number, end: number): AST.Node {
@@ -88,54 +89,61 @@ test('keeps lazy continuation lines after block quotes', () => {
 	expect(result?.text).toBe('foo\n  bar');
 });
 
+test('keeps the indentation of lazy continuation lines in list items', () => {
+	const source = '  1) foo\n    bar\n';
+
+	const result = sliceMarkdownSource(source, createNode('paragraph', 5, 16), [
+		createNode('listItem', 2, 16),
+	]);
+
+	expect(result?.text).toBe('foo\n    bar');
+});
+
+test('reads source lines from the content edge with leading whitespace as spaces up to a number of columns', () => {
+	const source = '- foo\n\n   bar\n  \t\tbaz\nqux\n';
+	const node = createNode('paragraph', 10, 25);
+	const containers = [createNode('listItem', 0, 25)];
+
+	expect(
+		readLinesFromContentEdge(
+			source,
+			node,
+			containers,
+			() => Number.POSITIVE_INFINITY
+		)
+	).toStrictEqual([
+		{ hasPrefixes: true, text: ' bar' },
+		{ hasPrefixes: true, text: '      baz' },
+		{ hasPrefixes: false, text: 'qux' },
+	]);
+	expect(
+		readLinesFromContentEdge(source, node, containers, () => 3)?.[1]
+	).toStrictEqual({ hasPrefixes: true, text: '      baz' });
+	expect(
+		readLinesFromContentEdge(source, node, containers, () => 2)?.[1]
+	).toStrictEqual({ hasPrefixes: true, text: '  \tbaz' });
+	expect(
+		readLinesFromContentEdge(source, {}, containers, () => 0)
+	).toBeUndefined();
+});
+
+test('reads recorded HTML blocks with leading whitespace as spaces covering its columns', () => {
+	const source = '- foo\n\n  \t<!-- bar -->\n  \t<!-- baz -->\n';
+	const node = {
+		...createNode('html', 9, 38),
+		value: '\t<!-- bar -->\n\t<!-- baz -->',
+	} as AST.HTMLNode;
+	const unrecordedNode = { ...node };
+
+	recordHTMLBlockText(source, node, [createNode('listItem', 0, 38)]);
+	recordHTMLBlockText(source, {}, []);
+
+	expect(readHTMLBlockText(node)).toBe('  <!-- bar -->\n  <!-- baz -->');
+	expect(readHTMLBlockText(unrecordedNode)).toBe(
+		'\t<!-- bar -->\n\t<!-- baz -->'
+	);
+});
+
 test('returns `undefined` without source positions', () => {
 	expect(sliceMarkdownSource('foo', {})).toBeUndefined();
-	expect(stripContainerPrefixes('foo', {}, [])).toBeUndefined();
-});
-
-test('measures indentation after the container prefixes that a line has in full', () => {
-	const quoteSource = '> foo\n>\t  bar\n';
-	const lazyQuoteSource = '> > foo\n> bar\n';
-	const lazyItemSource = '1.   foo\n    bar\n';
-
-	const quoteResult = measureLineIndentation(quoteSource, 6, [
-		createNode('blockquote', 0, 13),
-	]);
-	const lazyQuoteResult = measureLineIndentation(lazyQuoteSource, 8, [
-		createNode('blockquote', 0, 13),
-		createNode('blockquote', 2, 13),
-	]);
-	const lazyItemResult = measureLineIndentation(lazyItemSource, 9, [
-		createNode('listItem', 0, 16),
-	]);
-
-	expect(quoteResult).toStrictEqual({
-		indentation: 4,
-		isBlank: false,
-		isLazy: false,
-	});
-	expect(lazyQuoteResult).toStrictEqual({
-		indentation: 0,
-		isBlank: false,
-		isLazy: true,
-	});
-	expect(lazyItemResult).toStrictEqual({
-		indentation: 4,
-		isBlank: false,
-		isLazy: true,
-	});
-});
-
-test('measures lines with only container prefixes and spaces or tabs as blank', () => {
-	const source = '> foo\n>  \t\n> bar\n';
-
-	const result = measureLineIndentation(source, 6, [
-		createNode('blockquote', 0, 15),
-	]);
-
-	expect(result).toStrictEqual({
-		indentation: 2,
-		isBlank: true,
-		isLazy: false,
-	});
 });

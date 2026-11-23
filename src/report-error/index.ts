@@ -9,41 +9,14 @@ type ErrorDetails = {
 
 const PLUGIN_PREFIX = '[prettier-plugin-markdown-html]';
 
-/**
- * Throws an error for HTML that isn’t valid in its Markdown context.
- */
-export function reportInvalidHTML(details: ErrorDetails): never {
-	throw createError(SyntaxError, 'Invalid HTML', details);
-}
+// Errors that report a failure of Prettier’s HTML formatter
+const formatterFailures = new WeakSet<Error>();
 
 /**
- * Throws an error for a Markdown layout that can’t preserve the document’s
- * interpretation.
+ * Reports a layout error when formatting would change how the Markdown reads.
  */
 export function reportUnsafeLayout(details: ErrorDetails): never {
 	throw createError(Error, 'Unsafe Markdown layout', details);
-}
-
-/**
- * Throws an error when formatting would give an element’s opening and closing
- * tags different names.
- */
-export function reportChangedTagSpelling(
-	sourceName: string,
-	details: Omit<ErrorDetails, 'reason'>
-): never {
-	return reportUnsafeLayout({
-		...details,
-		reason: `Formatting would give this \`<${sourceName}>\` element different opening and closing tag names, which Prettier’s HTML parser would not match`,
-	});
-}
-
-/**
- * Throws an error for valid Markdown that the plugin can’t format, such as a
- * construct that Prettier’s Markdown parser reads differently from GFM.
- */
-export function reportUnsupportedMarkdown(details: ErrorDetails): never {
-	throw createError(Error, 'Unsupported Markdown', details);
 }
 
 /**
@@ -60,84 +33,60 @@ export function reportFormatterFailure(
 		.split('\n', 1)[0]!
 		.replace(/\s*\(\d+:\d+\)$/, '');
 
-	throw createError(
+	const error = createError(
 		cause instanceof SyntaxError ? SyntaxError : Error,
 		'Failed to format HTML with Prettier',
 		{ ...details, reason }
 	);
+
+	formatterFailures.add(error);
+	throw error;
 }
 
 /**
- * Throws an error for a parser from another plugin that this plugin can’t work
- * with.
+ * Checks whether an error reports a failure of Prettier’s HTML formatter.
  */
-export function reportIncompatibleParser(details: ErrorDetails): never {
-	throw createError(TypeError, 'Incompatible parser', details);
+export function isFormatterFailure(error: unknown): error is Error {
+	return error instanceof Error && formatterFailures.has(error);
 }
 
 /**
- * Names the Markdown construct that the reference renderer turns into an
- * element.
+ * Throws an error for a parser from another plugin whose syntax trees this
+ * plugin can’t work with.
  */
-export function describeGeneratedElement(tagName: string): string {
-	switch (tagName) {
-		case 'a':
-			return 'link';
+export function reportUnsupportedASTFormat({
+	expected,
+	filepath,
+	name,
+	received,
+}: {
+	expected: string;
+	filepath?: string | undefined;
+	name: string;
+	received: string | undefined;
+}): never {
+	const location = filepath ? ` while formatting \`${filepath}\`` : '';
 
-		case 'blockquote':
-			return 'block quote';
-
-		case 'code':
-			return 'code span';
-
-		case 'del':
-			return 'strikethrough text';
-
-		case 'em':
-			return 'emphasized text';
-
-		case 'li':
-			return 'list item';
-
-		case 'ol':
-
-		case 'ul':
-			return 'list';
-
-		case 'p':
-			return 'paragraph';
-
-		case 'pre':
-			return 'code block';
-
-		case 'strong':
-			return 'strongly emphasized text';
-
-		case 'table':
-			return 'table';
-
-		case 'td':
-
-		case 'th':
-			return 'table cell';
-
-		case 'tr':
-			return 'table row';
-
-		default:
-			return /^h[1-6]$/.test(tagName) ? 'heading' : `\`<${tagName}>\``;
-	}
+	throw new TypeError(
+		`${PLUGIN_PREFIX} Unsupported AST format for the \`${name}\` parser. Expected \`${expected}\`, received \`${received}\`${location}`
+	);
 }
 
 /**
- * Adds the indefinite article to the name of a Markdown construct.
+ * Describes a region that falls back to plain Prettier, for a notice.
  */
-export function withArticle(construct: string): string {
-	if (construct.endsWith(' text')) {
-		return construct;
-	}
+export function describeRejectedRegion(details: ErrorDetails): string {
+	return createMessage('Skipped HTML formatting', details).replace(
+		':\n\n',
+		': '
+	);
+}
 
-	return /^[aeiou]/.test(construct) ? `an ${construct}` : `a ${construct}`;
+/**
+ * Reports a region’s fallback to plain Prettier as an error in debug mode.
+ */
+export function reportRejectedRegion(details: ErrorDetails): never {
+	throw createError(Error, 'PRETTIER_DEBUG stopped formatting', details);
 }
 
 /**
@@ -148,19 +97,10 @@ function createError(
 	ErrorClass:
 		ErrorConstructor | SyntaxErrorConstructor | TypeErrorConstructor,
 	summary: string,
-	{ cause, filepath, position, reason }: ErrorDetails
+	details: ErrorDetails
 ): Error {
-	let message = `${PLUGIN_PREFIX} ${summary}`;
-
-	if (filepath) {
-		message += ` in \`${filepath}\``;
-	}
-
-	if (position) {
-		message += ` (${position.line}:${position.column})`;
-	}
-
-	const error = new ErrorClass(`${message}:\n\n${reason}`, { cause });
+	const { cause, position } = details;
+	const error = new ErrorClass(createMessage(summary, details), { cause });
 
 	if (position) {
 		// Prettier’s CLI reports errors with a `loc` as syntax errors, without
@@ -171,4 +111,25 @@ function createError(
 	}
 
 	return error;
+}
+
+/**
+ * Creates a message that names the plugin and includes any supplied file and
+ * original Markdown position.
+ */
+function createMessage(
+	summary: string,
+	{ filepath, position, reason }: ErrorDetails
+): string {
+	let message = `${PLUGIN_PREFIX} ${summary}`;
+
+	if (filepath) {
+		message += ` in \`${filepath}\``;
+	}
+
+	if (position) {
+		message += ` (${position.line}:${position.column})`;
+	}
+
+	return `${message}:\n\n${reason}`;
 }

@@ -70,10 +70,23 @@ const HTML_BLOCK_TAG_NAMES = new Set([
 	'ul',
 ]);
 
+// Elements whose opening tag starts an HTML block that ends at their closing
+// tag, which starts none
+const RAW_BLOCK_TAG_NAMES = new Set(['pre', 'script', 'style', 'textarea']);
+
 /**
  * Checks whether a tag can interrupt a paragraph with an HTML block in
- * CommonMark or Prettier’s Markdown parser.
+ * CommonMark or Prettier’s Markdown parser. The closing tags of raw text and
+ * preformatted elements can’t, under either parser.
  */
-export default function isBlockTag(tagName: string): boolean {
-	return HTML_BLOCK_TAG_NAMES.has(tagName.toLowerCase());
+export default function isBlockTag(
+	tagName: string,
+	isClosingTag = false
+): boolean {
+	const name = tagName.toLowerCase();
+
+	return (
+		HTML_BLOCK_TAG_NAMES.has(name) &&
+		!(isClosingTag && RAW_BLOCK_TAG_NAMES.has(name))
+	);
 }

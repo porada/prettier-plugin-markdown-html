@@ -1,6 +1,6 @@
 /**
- * Finds the end of the tag that starts at an offset, skipping quoted attribute
- * values. Returns `undefined` when the text ends first.
+ * Finds the offset after a tag’s first unquoted `>`. Returns `undefined` if the
+ * given offset doesn’t point to `<` or no unquoted `>` follows it.
  */
 export default function findTagEnd(
 	html: string,
