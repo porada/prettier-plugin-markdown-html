@@ -21,7 +21,7 @@
 ## Specification Work
 
 - **Scope:** Keep formatting behavior and its constraints in `SPEC.md`. Keep authoring and verification instructions here. Record settled rules rather than open questions, implementation history, or a catalog of current defects.
-- **Organization:** Lead with formatting outcomes. State each opening principle in one line, link it to the section that defines it, and follow the principles with one example of ordinary formatting. Cover ordinary formatting before corrections and rejections, then introduce Formatting Controls. Put reference material, including rare edge cases, specific renderer versions, and example settings, at the end.
+- **Organization:** Lead with formatting outcomes. State each opening principle in one line, link it to the section that defines it, and follow the principles with one example of ordinary formatting. Cover ordinary formatting before corrections and rejections, then introduce Formatting Controls. Put reference material, including specific renderer versions and example settings, at the end.
 - **Rule Sections:** When a section introduces a formatting rule, state the rule in the opening sentence and show an example before explaining the details. Examples are optional in sections devoted to limits, options, notices, edge cases, or reference material.
 - **Options:** Keep the option mapping and override rules with Formatting Controls. Explain individual option effects alongside the formatting rules they change, and include an option only when it affects a defined rule or example.
 - **Voice:** Write `SPEC.md` as a description of observable formatting behavior and its reasons. Use direct, explanatory prose rather than instructions addressed to the reader, and preserve the force of each rule.
@@ -58,11 +58,11 @@ pnpm exec prettier --no-config --no-editorconfig --parser html \
 
 Compare the successful command’s complete output with the paired HTML fence, including its final newline. A match verifies the rendered example. The integration test checks whether the plugin produces the documented Markdown.
 
-For rejected parts, protected source, and Markdown outside raw HTML, the comparison starts with **Input**. Save that fence’s contents in `<input-file>` and format them with plain Prettier. Add any options the example specifies to the baseline options below.
+For rejected regions, protected source, and Markdown outside raw HTML, the comparison starts with **Input**. Save that fence’s contents in `<input-file>` and format them with plain Prettier. Add any options the example specifies to the baseline options below.
 
 ```sh
 pnpm exec prettier --no-config --no-editorconfig --parser markdown \
     --print-width "<print-width>" --tab-width "<tab-width>" < "<input-file>"
 ```
 
-Compare those portions of the result with the corresponding text under **Output**, allowing for the differences described in [Rejected Parts](SPEC.md#rejected-parts) and [Line Breaks](SPEC.md#line-breaks).
+Compare those portions of the result with the corresponding text under **Output**. Require an exact match for rejected regions and protected Markdown source. For a rejected table cell, compare its [content](SPEC.md#document-regions) without column padding. Check the blank lines around HTML blocks against plain Prettier’s output. In the surrounding prose, account for the effect of [inline tag layout](SPEC.md#line-breaks) on wrapping.
