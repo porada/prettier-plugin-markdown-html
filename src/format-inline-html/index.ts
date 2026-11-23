@@ -300,7 +300,6 @@ async function layOutParagraph(
 	/* v8 ignore next -- @preserve */
 	if (changedTag) {
 		reportUnsafeLayout({
-			filepath: options.filepath,
 			position: changedTag.node.position?.start,
 			reason: 'Formatting couldn’t find a stable layout for this paragraph’s HTML tags.',
 		});
@@ -308,7 +307,6 @@ async function layOutParagraph(
 
 	if (printed.changesReading) {
 		reportUnsafeLayout({
-			filepath: options.filepath,
 			position: layout.paragraph.position?.start,
 			reason: 'The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
 		});
@@ -1257,7 +1255,6 @@ function keepOffLineStart(
 	// the indentation that keeps the HTML inline
 	if (separatorNode?.type === 'break' && isAdjacent) {
 		reportUnsafeLayout({
-			filepath: options.filepath,
 			position: fragment.node.position?.start,
 			reason: 'Formatting would put this HTML at the start of a line after the hard line break, where Prettier or GitHub Flavored Markdown would read it as an HTML block.',
 		});
@@ -1303,7 +1300,6 @@ function keepLeadingTagInParagraph(
 	}
 
 	reportUnsafeLayout({
-		filepath: options.filepath,
 		position: fragment.node.position?.start,
 		reason: 'Formatting would leave this tag alone on the paragraph’s first line, where Prettier or GitHub Flavored Markdown would read it as an HTML block.',
 	});

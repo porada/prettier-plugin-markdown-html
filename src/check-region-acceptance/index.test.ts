@@ -283,10 +283,7 @@ npm install --save-dev --save-exact prettier
 
 Press <KBD>Enter</KBD> to run it.
 `,
-		output: [
-			'block 1-11: split-construct pre at 4:1',
-			'inline 13: accepted',
-		],
+		output: ['block 1-11: split-element pre at 4:1', 'inline 13: accepted'],
 	},
 	{
 		example: 'Ignore Directives',
@@ -384,12 +381,12 @@ foo
 
 <p></style></div>
 `)
-	).resolves.toStrictEqual(['block 1-5: split-construct raw-text at 1:6']);
+	).resolves.toStrictEqual(['block 1-5: split-element style at 1:6']);
 	await expect(
 		decideRegions('foo <script>bar</script> <pre>baz</pre>\n')
-	).resolves.toStrictEqual(['inline 1: split-construct raw-text at 1:5']);
+	).resolves.toStrictEqual(['inline 1: split-element script at 1:5']);
 	await expect(decideRegions('foo <pre>bar</pre>\n')).resolves.toStrictEqual([
-		'inline 1: split-construct pre at 1:5',
+		'inline 1: split-element pre at 1:5',
 	]);
 });
 

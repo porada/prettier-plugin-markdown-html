@@ -499,7 +499,7 @@ Paste a snippet to compare the source with the formatted code.
 			).resolves.toStrictEqual({
 				notices: [
 					[
-						`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): Prettier’s Markdown layout would change how this HTML block is nested in lists or block quotes.`,
+						`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). Prettier’s Markdown layout would change how this HTML block is nested in lists or block quotes.`,
 					],
 				],
 				output: await format(input, {
@@ -742,7 +742,7 @@ describe('Block Boundaries', () => {
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Formatting would make the next line of Markdown part of this HTML block. Add a blank line after the block.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Formatting would make the next line of Markdown part of this HTML block. Add a blank line after the block.',
 				],
 			],
 			output: await format(input, {
@@ -756,14 +756,14 @@ describe('Block Boundaries', () => {
 		{
 			input: '- Install the extension.\n\n  <!-- logo --> <div align="center"><img src="logo.svg"></div>\n  - Press <kbd>Enter</kbd> to run it.\n',
 			notices: [
-				'(3:3): Formatting would make the next line of Markdown part of this HTML block. Add a blank line after the block.',
+				'(3:3). Formatting would make the next line of Markdown part of this HTML block. Add a blank line after the block.',
 			],
 		},
 		{
 			input: '- Install the extension.\n\n  <!-- logo --> <div align="center"><img src="logo.svg"></div>\n  - Copyright <year> <holder>\n',
 			notices: [
-				'(3:3): Formatting would make the next line of Markdown part of this HTML block. Add a blank line after the block.',
-				'(4:15): Close `<year>` with `</year>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'(3:3). Formatting would make the next line of Markdown part of this HTML block. Add a blank line after the block.',
+				'(4:15). Close `<year>` with `</year>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		},
 	])(
@@ -800,7 +800,7 @@ describe('Block Boundaries', () => {
 		expect(result).toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): GitHub Flavored Markdown reads this HTML as paragraph text. To start a block, put the first tag on its own line, separated from any preceding paragraph by a blank line.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). GitHub Flavored Markdown reads this HTML as paragraph text. To start a block, put the first tag on its own line, separated from any preceding paragraph by a blank line.',
 				],
 			],
 			output: expectedOutput,
@@ -819,7 +819,7 @@ describe('Block Boundaries', () => {
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): After formatting, GitHub Flavored Markdown would no longer recognize this as an HTML block, and some of its content would be interpreted as Markdown.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). After formatting, GitHub Flavored Markdown would no longer recognize this as an HTML block, and some of its content would be interpreted as Markdown.',
 				],
 			],
 			output: await format(input, {
@@ -1702,7 +1702,7 @@ describe('Line Breaks', () => {
 			const expectedResult = {
 				notices: [
 					[
-						'[prettier-plugin-markdown-html] Skipped HTML formatting (1:11): Close `<year>` with `</year>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+						'[prettier-plugin-markdown-html] Skipped HTML formatting (1:11). Close `<year>` with `</year>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 					],
 				],
 				output: input,
@@ -1755,7 +1755,7 @@ describe('Line Breaks', () => {
 			).resolves.toStrictEqual({
 				notices: [
 					[
-						'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
+						'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
 					],
 				],
 				output: await format(input, { ...options, plugins: [] }),
@@ -1771,7 +1771,7 @@ describe('Line Breaks', () => {
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
 				],
 			],
 			output: input,
@@ -1786,7 +1786,7 @@ describe('Line Breaks', () => {
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1): Formatting would put this HTML at the start of a line after the hard line break, where Prettier or GitHub Flavored Markdown would read it as an HTML block.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1). Formatting would put this HTML at the start of a line after the hard line break, where Prettier or GitHub Flavored Markdown would read it as an HTML block.',
 				],
 			],
 			output: input,
@@ -1932,7 +1932,7 @@ describe('Content Preservation', () => {
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Removing the blank line that Prettier’s HTML formatter adds would change a comment or other markup.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Removing the blank line that Prettier’s HTML formatter adds would change a comment or other markup.',
 				],
 			],
 			output: input,
@@ -1943,13 +1943,13 @@ describe('Content Preservation', () => {
 		{
 			context: 'after the checkbox paragraph',
 			input: '- [ ] Note\n\n  <pre   title="Setup" class="output">one\n  two\n  </pre>\n',
-			notice: '(3:3): Prettier’s Markdown layout would change the indentation inside the formatted HTML block.',
+			notice: '(3:3). Prettier’s Markdown layout would change the indentation inside the formatted HTML block.',
 			options: { singleAttributePerLine: true },
 		},
 		{
 			context: 'between Markdown blocks',
 			input: '- [x] Install\n\n  <div   class="note">\n  <pre>npm install\n    --save-dev prettier</pre>\n  </div>\n\n  Then format.\n',
-			notice: '(3:3): Prettier’s Markdown layout would change the indentation inside the formatted HTML block.',
+			notice: '(3:3). Prettier’s Markdown layout would change the indentation inside the formatted HTML block.',
 			options: {},
 		},
 	])(
@@ -2120,19 +2120,19 @@ describe('Corrections', () => {
 	test.each([
 		{
 			input: '<p><img src="prettier.svg" alt="Prettier"> </img></p>\n',
-			notice: '(1:44): No opening `<img>` matches this `</img>` in the same Markdown region.',
+			notice: '(1:44). No opening `<img>` matches this `</img>` in the same Markdown region.',
 		},
 		{
 			input: '<img src="logo.png" width=200></img>\n',
-			notice: '(1:1): Formatting would leave this tag alone on the paragraph’s first line, where Prettier or GitHub Flavored Markdown would read it as an HTML block.',
+			notice: '(1:1). Formatting would leave this tag alone on the paragraph’s first line, where Prettier or GitHub Flavored Markdown would read it as an HTML block.',
 		},
 		{
 			input: '<div align="center">\n\n**[Support Prettier](https://opencollective.com/prettier)**\n',
-			notice: '(1:1): Close `<div>` with `</div>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+			notice: '(1:1). Close `<div>` with `</div>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		},
 		{
 			input: '<p align="center">Prettier</p>\n</section>\n',
-			notice: '(2:1): No opening `<section>` matches this `</section>` in the same Markdown region.',
+			notice: '(2:1). No opening `<section>` matches this `</section>` in the same Markdown region.',
 		},
 	])(
 		'rejects the region that a correction can’t fix in $input',
@@ -2171,15 +2171,15 @@ describe('Corrections', () => {
 	test.each([
 		{
 			input: '<div><svg width="16"></br></svg></div>\n',
-			notice: '(1:22): No opening `<br>` matches this `</br>` in the same Markdown region.',
+			notice: '(1:22). No opening `<br>` matches this `</br>` in the same Markdown region.',
 		},
 		{
 			input: '<div><svg width="16"><source /></source></svg></div>\n',
-			notice: '(1:32): No opening `<source>` matches this `</source>` in the same Markdown region.',
+			notice: '(1:32). No opening `<source>` matches this `</source>` in the same Markdown region.',
 		},
 		{
 			input: '<div><math><source /></source></math></div>\n',
-			notice: '(1:22): No opening `<source>` matches this `</source>` in the same Markdown region.',
+			notice: '(1:22). No opening `<source>` matches this `</source>` in the same Markdown region.',
 		},
 	])(
 		'rejects an unpaired closing tag in SVG or MathML content in $input',
@@ -2223,11 +2223,11 @@ describe('Corrections', () => {
 	test.each([
 		{
 			input: '<div>Before</ br>After</div>\n',
-			notice: '(1:12): No opening `<br>` matches this `</ br>` in the same Markdown region.',
+			notice: '(1:12). No opening `<br>` matches this `</ br>` in the same Markdown region.',
 		},
 		{
 			input: '<p><img src="a.png"></ img></p>\n',
-			notice: '(1:21): No opening `<img>` matches this `</ img>` in the same Markdown region.',
+			notice: '(1:21). No opening `<img>` matches this `</ img>` in the same Markdown region.',
 		},
 	])(
 		'leaves a void closing tag with whitespace after `</` uncorrected in $input',
@@ -2289,19 +2289,19 @@ Read the <a href="CONTRIBUTING.md">contributing guide</a> before opening a pull 
 		{
 			context: 'a declaration',
 			input: '<!DOCTYPE html>\n\nRead the <A   href="guide.html">guide</A> first.\n',
-			notice: '(1:1): This region contains a markup declaration, which the plugin doesn’t support.',
+			notice: '(1:1). This region contains a markup declaration, which the plugin doesn’t support.',
 			output: '<!DOCTYPE html>\n\nRead the <a href="guide.html">guide</a> first.\n',
 		},
 		{
 			context: 'a processing instruction with `>` before its end',
 			input: '<?xml-stylesheet href="style.css" > ?>\n\nPress <KBD>Enter</KBD>.\n',
-			notice: '(1:1): This region contains a processing instruction, which the plugin doesn’t support.',
+			notice: '(1:1). This region contains a processing instruction, which the plugin doesn’t support.',
 			output: '<?xml-stylesheet href="style.css" > ?>\n\nPress <kbd>Enter</kbd>.\n',
 		},
 		{
 			context: 'an `svg` element split across HTML blocks',
 			input: '<svg viewBox="0 0 16 16">\n<path d="M8 0"/>\n\n</svg>\n\nPress <KBD>Enter</KBD>.\n',
-			notice: '(1:1): Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
+			notice: '(1:1). Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
 			output: '<svg viewBox="0 0 16 16">\n<path d="M8 0"/>\n\n</svg>\n\nPress <kbd>Enter</kbd>.\n',
 		},
 	])(
@@ -2332,7 +2332,7 @@ Read the <a href="CONTRIBUTING.md">contributing guide</a> before opening a pull 
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1): Close `<script>` with `</script>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1). Close `<script>` with `</script>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 				],
 			],
 			output: input,
@@ -2836,7 +2836,7 @@ On macOS, press <kbd>⌘</kbd>+<kbd>S</kbd> to save the file.
 			).resolves.toStrictEqual({
 				notices: [
 					[
-						'[prettier-plugin-markdown-html] Skipped HTML formatting (1:12): No opening `< br>` matches this `</ br>` in the same Markdown region.',
+						'[prettier-plugin-markdown-html] Skipped HTML formatting (1:12). No opening `< br>` matches this `</ br>` in the same Markdown region.',
 					],
 				],
 				output: await format(input, { ...options, plugins: [] }),
@@ -2867,7 +2867,7 @@ On macOS, press <kbd>⌘</kbd>+<kbd>S</kbd> to save the file.
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:17): No opening `<1div>` matches this `</1div>` in the same Markdown region.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:17). No opening `<1div>` matches this `</1div>` in the same Markdown region.',
 				],
 			],
 			output: '<div>Network map</1div></div>\n\nPress <kbd>Enter</kbd>.\n',
@@ -2877,15 +2877,15 @@ On macOS, press <kbd>⌘</kbd>+<kbd>S</kbd> to save the file.
 	test.each([
 		{
 			input: '<div>Before</br=foo>After</div>\n',
-			notice: '(1:16): Prettier can’t format this HTML: Unexpected character "="',
+			notice: '(1:16). Prettier can’t format this HTML:\n\nUnexpected character "="',
 		},
 		{
 			input: '<div>Before</img=foo>After</div>\n',
-			notice: '(1:17): Prettier can’t format this HTML: Unexpected character "="',
+			notice: '(1:17). Prettier can’t format this HTML:\n\nUnexpected character "="',
 		},
 		{
 			input: '<div>Before</br x>After</div>\n',
-			notice: '(1:17): Prettier can’t format this HTML: Unexpected character "x"',
+			notice: '(1:17). Prettier can’t format this HTML:\n\nUnexpected character "x"',
 		},
 	])(
 		'corrects nothing in text that starts with `</` without the form of a closing tag in $input',
@@ -2907,12 +2907,12 @@ On macOS, press <kbd>⌘</kbd>+<kbd>S</kbd> to save the file.
 		{
 			context: 'that text without the form of a closing tag leaves open',
 			input: "<div>Before</div=foo>\n\nSee <a href='x'>docs</a>.\n",
-			notice: '(1:1): Close `<div>` with `</div>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+			notice: '(1:1). Close `<div>` with `</div>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		},
 		{
 			context: 'whose closing tag its HTML block cuts off',
 			input: "<div>\n<p>Before</p></div\n\nSee <a href='x'>docs</a>.\n",
-			notice: '(2:14): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+			notice: '(2:14). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 		},
 	])(
 		'rejects through the end of the container after an element $context',
@@ -2944,7 +2944,7 @@ On macOS, press <kbd>⌘</kbd>+<kbd>S</kbd> to save the file.
 			).resolves.toStrictEqual({
 				notices: [
 					[
-						`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): Prettier can’t format this HTML: Unexpected character "b"`,
+						`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). Prettier can’t format this HTML:\n\nUnexpected character "b"`,
 					],
 				],
 				output: `${input}\n\nSee <a href="x">docs</a>.\n`,
@@ -3276,7 +3276,7 @@ Press <kbd>Enter</kbd> to run it.
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:5): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:5). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 				],
 			],
 			output: await format(input, {
@@ -3309,7 +3309,7 @@ Press <kbd>Enter</kbd> to run it.
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 				],
 			],
 			output: await format(input, {
@@ -3361,7 +3361,7 @@ Press <kbd>Enter</kbd> to run it.
 			).resolves.toStrictEqual({
 				notices: [
 					[
-						'[prettier-plugin-markdown-html] Skipped HTML formatting (1:6): Close this comment with `-->` in the same HTML fragment.',
+						'[prettier-plugin-markdown-html] Skipped HTML formatting (1:6). Close this comment with `-->` in the same HTML fragment.',
 					],
 				],
 				output: `Read ${comment} for details.\n\nPress <kbd>Enter</kbd>.\n`,
@@ -3373,12 +3373,12 @@ Press <kbd>Enter</kbd> to run it.
 		{
 			context: 'a comment',
 			input: '<details>\n<summary>Changelog</summary>\n<!-- TODO: add older entries\n\n- 1.0.0\n-->\n\n- 2.0.0: Initial release\n\n</details>\n',
-			notice: '(3:1): Close this comment with `-->` in the same HTML fragment.',
+			notice: '(3:1). Close this comment with `-->` in the same HTML fragment.',
 		},
 		{
 			context: 'a tag',
 			input: '<div>\n<span title="Release\n\nnotes">Changelog</span>\n</div>\n',
-			notice: '(2:1): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+			notice: '(2:1). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 		},
 	])(
 		'names $context that its HTML block leaves unfinished inside an element',
@@ -3414,10 +3414,10 @@ Read the <a href='CONTRIBUTING.md'>contributing guide</a>.
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:13): Close `<year>` with `</year>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:13). Close `<year>` with `</year>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 				],
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:6): No opening `<em>` matches this `</em>` in the same Markdown region.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:6). No opening `<em>` matches this `</em>` in the same Markdown region.',
 				],
 			],
 			output: `Copyright © <year> <copyright-holder>.
@@ -3438,7 +3438,7 @@ Read the <a href="CONTRIBUTING.md">contributing guide</a>.
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:10): Close `<span>` with `</span>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:10). Close `<span>` with `</span>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 				],
 			],
 			output: input,
@@ -3454,7 +3454,7 @@ Read the <a href="CONTRIBUTING.md">contributing guide</a>.
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): After formatting, GitHub Flavored Markdown would no longer recognize this as an HTML block, and some of its content would be interpreted as Markdown.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). After formatting, GitHub Flavored Markdown would no longer recognize this as an HTML block, and some of its content would be interpreted as Markdown.',
 				],
 			],
 			output: '<div>foo</div>\n\n<script>\n\nfoo\n\n</script><b>bar</b>\n\nbaz\n',
@@ -3472,10 +3472,10 @@ Read the <a href="CONTRIBUTING.md">contributing guide</a>.
 
 		expect(notices).toStrictEqual([
 			...[1, 3, 5, 7, 9].map((line) => [
-				`[prettier-plugin-markdown-html] Skipped HTML formatting (${line}:1): Close \`<a>\` with \`</a>\` in the same Markdown region, or escape \`<\` as \`&lt;\` if the tag is meant as text.`,
+				`[prettier-plugin-markdown-html] Skipped HTML formatting (${line}:1). Close \`<a>\` with \`</a>\` in the same Markdown region, or escape \`<\` as \`&lt;\` if the tag is meant as text.`,
 			]),
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting: 2 more regions.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting. 2 more regions.',
 			],
 		]);
 	});
@@ -3488,7 +3488,7 @@ Read the <a href="CONTRIBUTING.md">contributing guide</a>.
 
 		expect(notices).toStrictEqual([
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting in `docs/foo.md` (1:1): Close `<a>` with `</a>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting in `docs/foo.md` (1:1). Close `<a>` with `</a>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		]);
 	});
@@ -3497,25 +3497,25 @@ Read the <a href="CONTRIBUTING.md">contributing guide</a>.
 		{
 			context: 'in task list items',
 			input: '- [ ] foo\n\n  <!-- bar\n',
-			notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:3): Close this comment with `-->` in the same HTML fragment.',
+			notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:3). Close this comment with `-->` in the same HTML fragment.',
 			options: SPEC_EXAMPLE_OPTIONS,
 		},
 		{
 			context: 'after tabs',
 			input: '- <div>\n\t<span></div>\n',
-			notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (2:8): Prettier can’t format this HTML: Unexpected closing tag "div". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags',
+			notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (2:8). Prettier can’t format this HTML:\n\nUnexpected closing tag "div". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags',
 			options: { ...SPEC_EXAMPLE_OPTIONS, tabWidth: 2 },
 		},
 		{
 			context: 'after frontmatter',
 			input: '---\na: b\n---\n\n<div><p></div></p>\n',
-			notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (5:15): No opening `<p>` matches this `</p>` in the same Markdown region.',
+			notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (5:15). No opening `<p>` matches this `</p>` in the same Markdown region.',
 			options: SPEC_EXAMPLE_OPTIONS,
 		},
 		{
 			context: 'with CRLF line endings',
 			input: 'foo\r\n\r\n<div>\r\n<span></div>\r\n',
-			notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (4:7): Prettier can’t format this HTML: Unexpected closing tag "div". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags',
+			notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (4:7). Prettier can’t format this HTML:\n\nUnexpected closing tag "div". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags',
 			options: SPEC_EXAMPLE_OPTIONS,
 		},
 	])(
@@ -3546,11 +3546,9 @@ Read the <a href="CONTRIBUTING.md">contributing guide</a>.
 				...SPEC_EXAMPLE_OPTIONS,
 				filepath: 'docs/foo.md',
 			})
-		).rejects.toThrowErrorMatchingInlineSnapshot(`
-			[Error: [prettier-plugin-markdown-html] PRETTIER_DEBUG stopped formatting in \`docs/foo.md\` (1:1):
-
-			Close \`<a>\` with \`</a>\` in the same Markdown region, or escape \`<\` as \`&lt;\` if the tag is meant as text.]
-		`);
+		).rejects.toThrowErrorMatchingInlineSnapshot(
+			`[Error: [prettier-plugin-markdown-html] \`PRETTIER_DEBUG\` stopped formatting (1:1). Close \`<a>\` with \`</a>\` in the same Markdown region, or escape \`<\` as \`&lt;\` if the tag is meant as text.]`
+		);
 	});
 
 	test('formats regions that ignore directives acknowledge when `PRETTIER_DEBUG` is set', async () => {
@@ -4149,7 +4147,7 @@ See the <a href="https://prettier.io/docs/cli">CLI reference</a> for options.
 		const expectedResult = {
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Close `<div>` with `</div>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Close `<div>` with `</div>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 				],
 			],
 			output: await format(input, {
@@ -4426,7 +4424,7 @@ See the <a href="https://prettier.io/docs/cli">CLI reference</a> for options.
 			input: '<div   class="note">\n<!-- prettier-ignore -->\n<section   >\n\nRun `prettier --write .` to format the project.\n\n</section>\n</div>\n',
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): An ignore directive covers only part of this `<section>` element. Keep the whole element inside or outside the ignored source.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). An ignore directive covers only part of this `<section>` element. Keep the whole element inside or outside the ignored source.',
 				],
 			],
 		},
@@ -4500,7 +4498,7 @@ See the <a href="https://prettier.io/docs/cli">CLI reference</a> for options.
 		async ({ input, output, positions, tag }) => {
 			const notices = (position: string) => [
 				[
-					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): No opening \`<${tag}>\` matches this \`</${tag}>\` in the same Markdown region.`,
+					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). No opening \`<${tag}>\` matches this \`</${tag}>\` in the same Markdown region.`,
 				],
 			];
 
@@ -4539,7 +4537,7 @@ See the <a href="https://prettier.io/docs/cli">CLI reference</a> for options.
 				notices: [
 					[
 						expect.stringContaining(
-							`(${position}): Close \`<div>\` with \`</div>\``
+							`(${position}). Close \`<div>\` with \`</div>\``
 						),
 					],
 				],
@@ -4564,7 +4562,7 @@ See the <a href="https://prettier.io/docs/cli">CLI reference</a> for options.
 		expect(result).toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): Close `<div>` with `</div>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). Close `<div>` with `</div>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 				],
 			],
 			output: input,
@@ -4682,7 +4680,7 @@ See the <a href="https://prettier.io/docs/cli">CLI reference</a> for options.
 		await expect(formatWithNotices(input, options)).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:15): No opening `<p>` matches this `</p>` in the same Markdown region.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:15). No opening `<p>` matches this `</p>` in the same Markdown region.',
 				],
 			],
 			output: await format(input, { ...options, plugins: [] }),
@@ -4828,21 +4826,21 @@ describe('Baseline', () => {
 			context:
 				'after a paragraph line that formatting turns into a fence opening',
 			input: 'foo\n\t```\n\n<div   >bar</div>\n',
-			notice: '(4:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			notice: '(4:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 			options: SPEC_EXAMPLE_OPTIONS,
 		},
 		{
 			context:
 				'after a setext heading line that formatting turns into a fence opening',
 			input: 'foo\n\t```\n---\n\n<div   >bar</div>\n',
-			notice: '(5:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			notice: '(5:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 			options: SPEC_EXAMPLE_OPTIONS,
 		},
 		{
 			context:
 				'after a setext heading that wrapping can turn into a fence opening',
 			input: 'foo ~~~bar baz qux\n---\n\n<div   >quux</div>\n',
-			notice: '(4:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			notice: '(4:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 			options: {
 				...SPEC_EXAMPLE_OPTIONS,
 				printWidth: 8,
@@ -4853,13 +4851,13 @@ describe('Baseline', () => {
 			context:
 				'on a paragraph line that formatting turns into a fence opening',
 			input: 'foo\n    ```<span   >bar</span>\n',
-			notice: '(1:1): The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
+			notice: '(1:1). The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
 			options: SPEC_EXAMPLE_OPTIONS,
 		},
 		{
 			context: 'that wrapping moves into a fence',
 			input: 'foo\n```bar `baz`\n<span   >qux</span>\n',
-			notice: '(1:1): The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
+			notice: '(1:1). The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
 			options: {
 				...SPEC_EXAMPLE_OPTIONS,
 				printWidth: 8,
@@ -4870,7 +4868,7 @@ describe('Baseline', () => {
 			context:
 				'with `proseWrap` set to `always` after tildes in the visible text of a reference link',
 			input: 'foo [bar ~~~ baz][qux]\n\n<b>quux</b>\n\n[qux]: /corge\n',
-			notice: '(3:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			notice: '(3:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 			options: {
 				...SPEC_EXAMPLE_OPTIONS,
 				printWidth: 1,
@@ -4897,43 +4895,43 @@ describe('Supported Syntax', () => {
 		{
 			construct: 'declarations',
 			input: '<!DOCTYPE html>\n\n<p   align="center">Docs</p>\n',
-			notice: '(1:1): This region contains a markup declaration, which the plugin doesn’t support.',
+			notice: '(1:1). This region contains a markup declaration, which the plugin doesn’t support.',
 			output: '<!DOCTYPE html>\n\n<p align="center">Docs</p>\n',
 		},
 		{
 			construct: 'processing instructions',
 			input: '<?xml version="1.0" encoding="UTF-8"?>\n\n<p   align="center">Docs</p>\n',
-			notice: '(1:1): This region contains a processing instruction, which the plugin doesn’t support.',
+			notice: '(1:1). This region contains a processing instruction, which the plugin doesn’t support.',
 			output: '<?xml version="1.0" encoding="UTF-8"?>\n\n<p align="center">Docs</p>\n',
 		},
 		{
 			construct: 'CDATA sections',
 			input: '<div   class="note"><![CDATA[ x < y ]]></div>\n\n<p   align="center">Docs</p>\n',
-			notice: '(1:21): This region contains a CDATA section, which the plugin doesn’t support.',
+			notice: '(1:21). This region contains a CDATA section, which the plugin doesn’t support.',
 			output: '<div   class="note"><![CDATA[ x < y ]]></div>\n\n<p align="center">Docs</p>\n',
 		},
 		{
 			construct: 'inline SVG',
 			input: 'Click <svg   width="16" height="16"><use href="#gear"/></svg> to open <b   >Settings</b>.\n',
-			notice: '(1:7): To format this inline `<svg>`, put the whole element in one HTML block.',
+			notice: '(1:7). To format this inline `<svg>`, put the whole element in one HTML block.',
 			output: 'Click <svg   width="16" height="16"><use href="#gear"/></svg> to open <b   >Settings</b>.\n',
 		},
 		{
 			construct: 'inline MathML',
 			input: 'The area is <math   ><mi>r</mi></math> squared.\n',
-			notice: '(1:13): To format this inline `<math>`, put the whole element in one HTML block.',
+			notice: '(1:13). To format this inline `<math>`, put the whole element in one HTML block.',
 			output: 'The area is <math   ><mi>r</mi></math> squared.\n',
 		},
 		{
 			construct: 'a foreign element that extends beyond its HTML block',
 			input: '<svg   viewBox="0 0 16 16">\n<path d="M8 0"/>\n\n</svg>\n',
-			notice: '(1:1): Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
+			notice: '(1:1). Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
 			output: '<svg   viewBox="0 0 16 16">\n<path d="M8 0"/>\n\n</svg>\n',
 		},
 		{
 			construct: 'a table cell whose raw HTML contains an escaped pipe',
 			input: '| Key | Action |\n| --- | --- |\n| <kbd   title="Pipe \\| key">\\|</kbd> | Splits cells |\n',
-			notice: '(3:3): The raw HTML in this table cell contains an escaped pipe (`\\|`).',
+			notice: '(3:3). The raw HTML in this table cell contains an escaped pipe (`\\|`).',
 			output: '| Key                                 | Action       |\n| ----------------------------------- | ------------ |\n| <kbd   title="Pipe \\| key">\\|</kbd> | Splits cells |\n',
 		},
 	])(
@@ -4983,10 +4981,10 @@ describe('Supported Syntax', () => {
 		).resolves.toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Prettier can’t format this HTML: foo',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Prettier can’t format this HTML:\n\nfoo',
 				],
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:9): Prettier can’t format this HTML: foo',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:9). Prettier can’t format this HTML:\n\nfoo',
 				],
 			],
 			output: expectedOutput,
@@ -5080,7 +5078,7 @@ describe('Errors', () => {
 				plugins: [priorPlugin, pluginMarkdownHTML],
 			})
 		).rejects.toThrowErrorMatchingInlineSnapshot(
-			`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`markdown\` parser. Expected \`mdast\`, received \`foo\` while formatting \`docs/foo.md\`]`
+			`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`markdown\` parser. Expected \`mdast\`, received \`foo\`]`
 		);
 	});
 

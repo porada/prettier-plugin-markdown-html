@@ -414,7 +414,7 @@ test.each(['script', 'style', 'textarea', 'title'])(
 		expect(result).toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Keep both tags of this raw text element in one HTML block.',
+					`[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Keep \`<${tagName}>\` and \`</${tagName}>\` together in one HTML block.`,
 				],
 			],
 			output: await format(input, { parser: 'markdown' }),
@@ -452,62 +452,62 @@ test.each(['script', 'style', 'textarea', 'title'])(
 test.each([
 	{
 		input: 'Before <title id = "foo">bar **baz</title> qux**\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Keep `<title>` and `</title>` together in one HTML block.',
 		parserName: 'markdown',
 	},
 	{
 		input: 'Before **<title id = "foo">bar** baz</title> After\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:10): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:10). Keep `<title>` and `</title>` together in one HTML block.',
 		parserName: 'markdown',
 	},
 	{
 		input: 'Before <textarea id = "foo">bar\n\nbaz</textarea> After\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		parserName: 'markdown',
 	},
 	{
 		input: 'Before <textarea id = "foo">bar\n\n<b id="baz">qux</b>\n\n</textarea> After\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		parserName: 'markdown',
 	},
 	{
 		input: 'Before <textarea id = "foo">bar\n\n<div></textarea><section>\n\n<aside>baz</aside>\n</section>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		parserName: 'markdown',
 	},
 	{
 		input: '> Before <textarea>foo\n>\n> <script>\n>\n> bar</script>\n>\n> </textarea>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:10): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:10). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		parserName: 'markdown',
 	},
 	{
 		input: 'Before <title id = "foo">bar **baz</title> qux**\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Keep `<title>` and `</title>` together in one HTML block.',
 		parserName: 'remark',
 	},
 	{
 		input: 'Before **<title id = "foo">bar** baz</title> After\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:10): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:10). Keep `<title>` and `</title>` together in one HTML block.',
 		parserName: 'remark',
 	},
 	{
 		input: 'Before <textarea id = "foo">bar\n\nbaz</textarea> After\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		parserName: 'remark',
 	},
 	{
 		input: 'Before <textarea id = "foo">bar\n\n<b id="baz">qux</b>\n\n</textarea> After\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		parserName: 'remark',
 	},
 	{
 		input: 'Before <textarea id = "foo">bar\n\n<div></textarea><section>\n\n<aside>baz</aside>\n</section>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		parserName: 'remark',
 	},
 	{
 		input: '> Before <textarea>foo\n>\n> <script>\n>\n> bar</script>\n>\n> </textarea>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:10): Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:10). Close `<textarea>` with `</textarea>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 		parserName: 'remark',
 	},
 ] as const)(
@@ -883,73 +883,73 @@ test.each([
 test.each([
 	{
 		input: '<div title="\n\n<div>"></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 		parserName: 'markdown',
 		prefix: '',
 	},
 	{
 		input: '<div title="\n\n<div>"></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:3): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:3). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 		parserName: 'markdown',
 		prefix: '  ',
 	},
 	{
 		input: '<div title="\n\n<div>"></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:3): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:3). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 		parserName: 'markdown',
 		prefix: '> ',
 	},
 	{
 		input: '<div><textarea>foo\n\n<div>bar</textarea></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:6): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:6). Keep `<textarea>` and `</textarea>` together in one HTML block.',
 		parserName: 'markdown',
 		prefix: '',
 	},
 	{
 		input: '<div><textarea>foo\n\n<div>bar</textarea></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:8): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:8). Keep `<textarea>` and `</textarea>` together in one HTML block.',
 		parserName: 'markdown',
 		prefix: '  ',
 	},
 	{
 		input: '<div><textarea>foo\n\n<div>bar</textarea></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Keep `<textarea>` and `</textarea>` together in one HTML block.',
 		parserName: 'markdown',
 		prefix: '> ',
 	},
 	{
 		input: '<div title="\n\n<div>"></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 		parserName: 'remark',
 		prefix: '',
 	},
 	{
 		input: '<div title="\n\n<div>"></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:3): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:3). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 		parserName: 'remark',
 		prefix: '  ',
 	},
 	{
 		input: '<div title="\n\n<div>"></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:3): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:3). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 		parserName: 'remark',
 		prefix: '> ',
 	},
 	{
 		input: '<div><textarea>foo\n\n<div>bar</textarea></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:6): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:6). Keep `<textarea>` and `</textarea>` together in one HTML block.',
 		parserName: 'remark',
 		prefix: '',
 	},
 	{
 		input: '<div><textarea>foo\n\n<div>bar</textarea></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:8): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (3:8). Keep `<textarea>` and `</textarea>` together in one HTML block.',
 		parserName: 'remark',
 		prefix: '  ',
 	},
 	{
 		input: '<div><textarea>foo\n\n<div>bar</textarea></div>\n',
-		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8): Keep both tags of this raw text element in one HTML block.',
+		notice: '[prettier-plugin-markdown-html] Skipped HTML formatting (1:8). Keep `<textarea>` and `</textarea>` together in one HTML block.',
 		parserName: 'remark',
 		prefix: '> ',
 	},
@@ -988,7 +988,7 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		expect(result).toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 				],
 			],
 			output: await format(input, { parser: parserName }),
@@ -1127,7 +1127,7 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		expect(result).toStrictEqual({
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:5): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (1:5). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 				],
 			],
 			output: await format(input, { parser: parserName }),
@@ -1155,7 +1155,7 @@ test('leaves elements around a tag split across HTML nodes to plain Prettier', a
 	expect(result).toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 			],
 		],
 		output: await format(input, { parser: 'markdown' }),
@@ -1178,7 +1178,7 @@ test('leaves a root tag split across HTML nodes to plain Prettier', async () => 
 	expect(result).toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Complete this tag, including any quoted attribute values, in the same HTML fragment.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 			],
 		],
 		output: await format(input, { parser: 'markdown' }),
@@ -1196,7 +1196,7 @@ test('leaves HTML blocks after tabs in list items to plain Prettier', async () =
 	expect(result).toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:2): Close `<details>` with `</details>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:2). Close `<details>` with `</details>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: await format(input, { parser: 'markdown' }),
@@ -1369,35 +1369,35 @@ test.each([
 	{
 		input: '<div><svg></div>\n\n<p   >foo</p>\n',
 		notices: [
-			'(1:6): Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
+			'(1:6). Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
 		],
 		output: '<div><svg></div>\n\n<p>foo</p>\n',
 	},
 	{
 		input: '<div><math></div>\n\n<p   >foo</p>\n',
 		notices: [
-			'(1:6): Close `<math>` with `</math>` in the same HTML block, before any enclosing element closes.',
+			'(1:6). Close `<math>` with `</math>` in the same HTML block, before any enclosing element closes.',
 		],
 		output: '<div><math></div>\n\n<p>foo</p>\n',
 	},
 	{
 		input: '<div><object><svg></div>\n\n<source>\n<circle></circle>\n',
 		notices: [
-			'(1:14): Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
+			'(1:14). Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
 		],
 		output: '<div><object><svg></div>\n\n<source />\n<circle></circle>\n',
 	},
 	{
 		input: '<svg>\n\n</svg>\n\n<p   >foo</p>\n',
 		notices: [
-			'(1:1): Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
+			'(1:1). Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
 		],
 		output: '<svg>\n\n</svg>\n\n<p>foo</p>\n',
 	},
 	{
 		input: 'foo <span><svg></span></svg> bar.\n\n<p   >baz</p>\n',
 		notices: [
-			'(1:11): Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
+			'(1:11). Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
 		],
 		output: 'foo <span><svg></span></svg> bar.\n\n<p>baz</p>\n',
 	},
@@ -1456,13 +1456,13 @@ test.each([
 	{
 		input: '<div>foo</div>\n<x:y></x:y>\n\nbar\n\t```\n\n<div   >foo</div>\n',
 		notices: [
-			'(7:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			'(7:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 		],
 	},
 	{
 		input: 'foo\n\t```\n\n<div   >bar</div>\n\nbaz\n\t```\n\n<div>bar</div>\n',
 		notices: [
-			'(4:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			'(4:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 		],
 	},
 ])(
@@ -1537,7 +1537,7 @@ test.each(
 		const expectedResult = {
 			notices: [
 				[
-					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): After formatting, this HTML block would combine with the HTML block after it, so formatting the result again would change it.`,
+					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). After formatting, this HTML block would combine with the HTML block after it, so formatting the result again would change it.`,
 				],
 			],
 			output: expectedOutput,
@@ -1561,7 +1561,7 @@ test.each(MARKDOWN_PARSER_NAMES)(
 		const expectedResult = {
 			notices: [
 				[
-					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): After formatting, this HTML block would combine with the HTML block after it, so formatting the result again would change it.',
+					'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). After formatting, this HTML block would combine with the HTML block after it, so formatting the result again would change it.',
 				],
 			],
 			output: '<div>\n\n<!-- foo --><p   >bar</p>\n<p>baz</p>\n\n</div>\n',
@@ -1653,7 +1653,7 @@ test.each([
 test('reports a notice for each region that marker characters running out reject', async () => {
 	const input = `\`\`\`\n${MARKER_CHARACTERS.join('')}\n\`\`\`\n\n<div   >foo</div>\n\nbar <b   >baz</b>\n`;
 	const notice = (position: string) => [
-		`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): The plugin can’t check this document’s HTML layout because every character it can use as a marker already appears in the text.`,
+		`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). The plugin can’t check this document’s HTML layout because every character it can use as a marker already appears in the text.`,
 	];
 
 	await expect(
@@ -1719,7 +1719,7 @@ test('formats the table cells before a cell that leaves `pre` open', async () =>
 	await expect(formatWithNotices(input, options)).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:27): Close `<pre>` with `</pre>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:27). Close `<pre>` with `</pre>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: '| foo            | bar       |\n| -------------- | --------- |\n| <kbd>baz</kbd> | qux <pre> |\n\n<p   >quux</p>\n',
@@ -1765,7 +1765,7 @@ test('restores plain Prettier’s blank line after a link reference definition w
 	const output = await format(input, { parser: 'markdown' });
 	const notices = (line: number) => [
 		[
-			`[prettier-plugin-markdown-html] Skipped HTML formatting (${line}:1): Formatting would put this \`prettier-ignore\` comment on its own line and change which HTML it ignores on the next pass. Keep the HTML you want to ignore in one Markdown block, with a blank line after it.`,
+			`[prettier-plugin-markdown-html] Skipped HTML formatting (${line}:1). Formatting would put this \`prettier-ignore\` comment on its own line and change which HTML it ignores on the next pass. Keep the HTML you want to ignore in one Markdown block, with a blank line after it.`,
 		],
 	];
 
@@ -2195,7 +2195,7 @@ test.each([
 		const expectedResult = {
 			notices: [
 				[
-					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): Formatting would put this \`prettier-ignore\` comment on its own line and change which HTML it ignores on the next pass. Keep the HTML you want to ignore in one Markdown block, with a blank line after it.`,
+					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). Formatting would put this \`prettier-ignore\` comment on its own line and change which HTML it ignores on the next pass. Keep the HTML you want to ignore in one Markdown block, with a blank line after it.`,
 				],
 			],
 			output: await format(input, { parser: 'markdown' }),
@@ -2334,7 +2334,7 @@ test.each([
 		const expectedResult = {
 			notices: [
 				[
-					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): An ignore directive covers only part of this \`<${name}>\` element. Keep the whole element inside or outside the ignored source.`,
+					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). An ignore directive covers only part of this \`<${name}>\` element. Keep the whole element inside or outside the ignored source.`,
 				],
 			],
 			output: input,
@@ -2359,7 +2359,7 @@ test('keeps the general notice when an inline ignore comment also protects the c
 	const expectedResult = {
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:29): An ignore directive covers only part of this `<b>` element. Keep the whole element inside or outside the ignored source.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:29). An ignore directive covers only part of this `<b>` element. Keep the whole element inside or outside the ignored source.',
 			],
 		],
 		output: input,
@@ -2586,7 +2586,7 @@ test.each([
 		const plainOptions = { parser: 'markdown' as const, ...rowOptions };
 		const rejection = [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
 			],
 		];
 		const plainRoot = (await markdownParsers.markdown.parse(
@@ -2639,7 +2639,7 @@ test('rejects a quoted paragraph after a titled link reference definition when f
 	};
 	const notices = (line: number) => [
 		[
-			`[prettier-plugin-markdown-html] Skipped HTML formatting (${line}:1): The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.`,
+			`[prettier-plugin-markdown-html] Skipped HTML formatting (${line}:1). The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.`,
 		],
 	];
 
@@ -2663,7 +2663,7 @@ test.each<{
 }>(
 	MARKDOWN_PARSER_NAMES.flatMap((parser) => {
 		const notice = (position: string, message: string) => [
-			`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): ${message}`,
+			`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). ${message}`,
 		];
 		const unclosedNotice = (position: string, name: string) =>
 			notice(
@@ -2842,7 +2842,7 @@ test.each([
 		const expectedResult = {
 			notices: [
 				[
-					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}): After formatting, GitHub Flavored Markdown would no longer recognize this as an HTML block, and some of its content would be interpreted as Markdown.`,
+					`[prettier-plugin-markdown-html] Skipped HTML formatting (${position}). After formatting, GitHub Flavored Markdown would no longer recognize this as an HTML block, and some of its content would be interpreted as Markdown.`,
 				],
 			],
 			output: await format(input, { parser: 'markdown' }),
@@ -3012,7 +3012,7 @@ test('keeps plain Prettier’s indentation for a rejected HTML block that stays 
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:2): No opening `<div>` matches this `</div>` in the same Markdown region.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:2). No opening `<div>` matches this `</div>` in the same Markdown region.',
 			],
 		],
 		output: input,
@@ -3049,7 +3049,7 @@ test('rejects an unclosed tag on a lazy continuation line only for its tag match
 	expect(result).toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:5): Close `<span>` with `</span>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:5). Close `<span>` with `</span>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: '1. bar\n   <span>\n\n- [ ] task\n',
@@ -3059,7 +3059,7 @@ test('rejects an unclosed tag on a lazy continuation line only for its tag match
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:4): Close `<span>` with `</span>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:4). Close `<span>` with `</span>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: result.output,
@@ -3526,7 +3526,7 @@ test('reports rejected regions with the file and the Markdown position', async (
 	expect(resultWithSource).toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting in `foo/bar.md` (1:15): No opening `<p>` matches this `</p>` in the same Markdown region.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting in `foo/bar.md` (1:15). No opening `<p>` matches this `</p>` in the same Markdown region.',
 			],
 		],
 		output: '<div><p></div></p>\n',
@@ -3534,7 +3534,7 @@ test('reports rejected regions with the file and the Markdown position', async (
 	expect(resultWithoutSource).toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:15): No opening `<p>` matches this `</p>` in the same Markdown region.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:15). No opening `<p>` matches this `</p>` in the same Markdown region.',
 			],
 		],
 		output: '<div><p></div></p>\n',

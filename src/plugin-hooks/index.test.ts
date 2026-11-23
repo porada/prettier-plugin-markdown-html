@@ -2591,7 +2591,7 @@ test('rejects prior parsers with incompatible AST formats with the `remark` pars
 	);
 });
 
-test('names the file when rejecting incompatible parsers', async () => {
+test('omits the file path when rejecting incompatible parsers', async () => {
 	const priorPlugin: Plugin = {
 		parsers: {
 			markdown: {
@@ -2607,7 +2607,7 @@ test('names the file when rejecting incompatible parsers', async () => {
 			parser: 'markdown',
 			plugins: [priorPlugin, pluginMarkdownHTML],
 		})
-	).rejects.toThrow(
-		'[prettier-plugin-markdown-html] Unsupported AST format for the `markdown` parser. Expected `mdast`, received `incompatible-mdast` while formatting `foo/bar.md`'
+	).rejects.toThrowErrorMatchingInlineSnapshot(
+		`[TypeError: [prettier-plugin-markdown-html] Unsupported AST format for the \`markdown\` parser. Expected \`mdast\`, received \`incompatible-mdast\`]`
 	);
 });

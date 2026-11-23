@@ -1,6 +1,7 @@
 import type { Rejection } from '../decide-regions/index.ts';
 import type { Regions } from '../types/index.d.ts';
 import { expect, onTestFinished, test, vi } from 'vite-plus/test';
+import { reportUnsafeLayout } from '../report-error/index.ts';
 import reportNotices from './index.ts';
 
 const POSITION = { column: 2, line: 3, offset: 10 };
@@ -38,12 +39,20 @@ test('quotes a closing tag written across lines on one line', () => {
 
 	expect(reportWithWarnings([{ problem }])).toStrictEqual([
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (3:2): No opening `<foo>` matches this `</foo >` in the same Markdown region.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (3:2). No opening `<foo>` matches this `</foo >` in the same Markdown region.',
 		],
 	]);
 });
 
 test('describes each reason a region falls back to plain Prettier', () => {
+	let layoutError: unknown;
+
+	try {
+		reportUnsafeLayout({ position: POSITION, reason: 'Garply' });
+	} catch (error: unknown) {
+		layoutError = error;
+	}
+
 	const problems: Rejection[] = [
 		{ kind: 'changed-role', position: POSITION },
 		{
@@ -65,7 +74,11 @@ test('describes each reason a region falls back to plain Prettier', () => {
 			kind: 'self-closing',
 			position: POSITION,
 		},
-		{ construct: 'pre', kind: 'split-construct', position: POSITION },
+		{
+			element: createElement('pre'),
+			kind: 'split-element',
+			position: POSITION,
+		},
 		{
 			element: createElement('qux'),
 			kind: 'unclosed-element',
@@ -90,14 +103,7 @@ test('describes each reason a region falls back to plain Prettier', () => {
 			} as Regions.ClosingTag,
 		},
 		{
-			cause: new Error(
-				'[prettier-plugin-markdown-html] Unsafe Markdown layout (3:2):\n\nGarply'
-			),
-			kind: 'unsafe-layout',
-			position: POSITION,
-		},
-		{
-			cause: new TypeError('Fred\nWaldo'),
+			cause: layoutError,
 			kind: 'unsafe-layout',
 			position: POSITION,
 		},
@@ -129,19 +135,18 @@ test('describes each reason a region falls back to plain Prettier', () => {
 			'Prettier’s Markdown layout would change how this HTML block is nested in lists or block quotes.',
 			'Formatting would make the next line of Markdown part of this HTML block. Add a blank line after the block.',
 			'Prettier’s Markdown layout would change the indentation inside the formatted HTML block.',
-			'HTML leaves `<baz/>` open. Use `<baz>` and `</baz>`.',
+			'HTML doesn’t support self-closing syntax for `<baz>`. Use an explicit closing tag `</baz>`.',
 			'Keep `<pre>` and `</pre>` together in one HTML block.',
 			'Close `<qux>` with `</qux>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
-			'Prettier can’t format this HTML: Unexpected closing tag',
-			'Prettier can’t format this HTML: Corge',
+			'Prettier can’t format this HTML:\n\nUnexpected closing tag',
+			'Prettier can’t format this HTML:\n\nCorge',
 			'No opening `<grault>` matches this `</ grault>` in the same Markdown region.',
 			'Garply',
-			'Fred',
 			'This region contains a CDATA section, which the plugin doesn’t support.',
 			'This region contains a markup declaration, which the plugin doesn’t support.',
 			'This region contains a processing instruction, which the plugin doesn’t support.',
 		].map((reason) => [
-			`[prettier-plugin-markdown-html] Skipped HTML formatting (3:2): ${reason}`,
+			`[prettier-plugin-markdown-html] Skipped HTML formatting (3:2). ${reason}`,
 		])
 	);
 });
@@ -165,12 +170,12 @@ test('counts the notices after the first five', () => {
 			'bar.md'
 		).at(-1)
 	).toStrictEqual([
-		'[prettier-plugin-markdown-html] Skipped HTML formatting in `bar.md`: 1 more region.',
+		'[prettier-plugin-markdown-html] Skipped HTML formatting in `bar.md`. 1 more region.',
 	]);
 	expect(
 		reportWithWarnings(Array.from({ length: 8 }, () => notice)).at(-1)
 	).toStrictEqual([
-		'[prettier-plugin-markdown-html] Skipped HTML formatting: 3 more regions.',
+		'[prettier-plugin-markdown-html] Skipped HTML formatting. 3 more regions.',
 	]);
 });
 
@@ -196,8 +201,21 @@ test('throws the first rejection instead when `PRETTIER_DEBUG` is set', () => {
 			{ filepath: 'bar.md' }
 		)
 	).toThrowErrorMatchingInlineSnapshot(`
-		[Error: [prettier-plugin-markdown-html] PRETTIER_DEBUG stopped formatting in \`bar.md\` (3:2):
+		[Error: [prettier-plugin-markdown-html] \`PRETTIER_DEBUG\` stopped formatting (3:2). Prettier can’t format this HTML:
 
-		Prettier can’t format this HTML: Foo]
+		Foo]
 	`);
+});
+
+test('separates an unexpected layout failure from the notice', () => {
+	const cause = new TypeError('Foo\nBar');
+	expect(
+		reportWithWarnings([
+			{ problem: { cause, kind: 'unsafe-layout', position: POSITION } },
+		])
+	).toStrictEqual([
+		[
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (3:2):\n\nFoo\nBar',
+		],
+	]);
 });

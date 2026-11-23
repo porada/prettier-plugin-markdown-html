@@ -450,10 +450,10 @@ test('rejects the remaining regions when a failed layout rejects no further regi
 	]);
 	expect(warn.mock.calls).toStrictEqual([
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 		],
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 		],
 	]);
 });
@@ -502,10 +502,10 @@ test('rejects the remaining regions when a failed role check names only rejected
 	]);
 	expect(warn.mock.calls).toStrictEqual([
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 		],
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 		],
 	]);
 });
@@ -540,7 +540,9 @@ test('rejects a region whose layout fails with an error of its own', async () =>
 	expect(root.children![0]!.children![1]!.value).toBe('<b   >');
 	expect(root.children![1]!.value).toBe('<div>baz</div>');
 	expect(warn.mock.calls).toStrictEqual([
-		['[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): foo'],
+		[
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1):\n\nfoo\nbar',
+		],
 	]);
 });
 
@@ -580,7 +582,7 @@ test('rejects a region whose layout no Markdown arrangement satisfies', async ()
 
 	expect(root.children![0]!.children![1]!.value).toBe('<b   >');
 	expect(warn.mock.calls).toStrictEqual([
-		['[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): foo'],
+		['[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). foo'],
 	]);
 });
 
@@ -592,7 +594,7 @@ test('rejects only the region that Prettier can’t format with the configured p
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): Prettier can’t format this HTML: Failed to print',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). Prettier can’t format this HTML:\n\nFailed to print',
 			],
 		],
 		output: '<div>foo</div>\n\n<x-bad   >bar</x-bad>\n',
@@ -607,7 +609,7 @@ test('tries an inline region on its own when its container’s HTML fails to for
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): Prettier can’t format this HTML: Failed to print',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). Prettier can’t format this HTML:\n\nFailed to print',
 			],
 		],
 		output: 'foo <b>bar</b>\n\n<x-bad   >baz</x-bad>\n',
@@ -623,7 +625,7 @@ test('keeps inline HTML formatted when an HTML block beside it fails to parse', 
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (4:1): Prettier can’t format this HTML: Bad tag',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (4:1). Prettier can’t format this HTML:\n\nBad tag',
 			],
 		],
 		output: 'foo <b>bar</b>\n\n<div>\n<x-bad   >baz</x-bad>\n</div>\n',
@@ -639,7 +641,7 @@ test('tries a region on its own with its corrections when its HTML fails to form
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:3): Prettier can’t format this HTML: Failed to print',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:3). Prettier can’t format this HTML:\n\nFailed to print',
 			],
 		],
 		output: '> <div   >\n> <x-bad>foo</x-bad></br>\n> </div>\n>\n> bar\n\nbaz\n',
@@ -654,7 +656,7 @@ test('locates a parse failure on a later line of a region', async () => {
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1): Prettier can’t format this HTML: Bad tag',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (2:1). Prettier can’t format this HTML:\n\nBad tag',
 			],
 		],
 		output: '<div>\n<x-bad   >foo</x-bad>\n</div>\n',
@@ -688,10 +690,10 @@ test('rejects the regions of a container whose HTML fails to format only togethe
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Prettier can’t format this HTML: Foo',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Prettier can’t format this HTML:\n\nFoo',
 			],
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:3): Prettier can’t format this HTML: Foo',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:3). Prettier can’t format this HTML:\n\nFoo',
 			],
 		],
 		output: '<div   >bar</div>\n\n> <div   >\n>\n> baz\n>\n> </div>\n',
@@ -766,7 +768,7 @@ test('rejects only the nested region that Prettier can’t format', async () => 
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1): Prettier can’t format this HTML: Bad attribute',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:1). Prettier can’t format this HTML:\n\nBad attribute',
 			],
 		],
 		output: '<details>\n\n<div id="bad">foo</div>\n\n<div>bar</div>\n\n</details>\n',
@@ -788,9 +790,9 @@ test('reports the nested region whose embedded code Prettier can’t format when
 			}
 		)
 	).rejects.toThrowErrorMatchingInlineSnapshot(`
-		[Error: [prettier-plugin-markdown-html] PRETTIER_DEBUG stopped formatting (3:1):
+		[Error: [prettier-plugin-markdown-html] \`PRETTIER_DEBUG\` stopped formatting (3:1). Prettier can’t format this HTML:
 
-		Prettier can’t format this HTML: CssSyntaxError: Unclosed block]
+		CssSyntaxError: Unclosed block]
 	`);
 });
 
@@ -803,7 +805,7 @@ test('diagnoses a region with the accepted regions nested in it', async () => {
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Prettier can’t format this HTML: Failed to print',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Prettier can’t format this HTML:\n\nFailed to print',
 			],
 		],
 		output: input,
@@ -839,7 +841,7 @@ test('diagnoses a failure with the options of the formatting that failed', async
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:3): Prettier can’t format this HTML: Too narrow',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:3). Prettier can’t format this HTML:\n\nToo narrow',
 			],
 		],
 		output: '> <div>foo</div>\n>\n> <x-bad   >\n> bar\n> </x-bad>\n',
@@ -855,7 +857,7 @@ test('reports where the configured parser rejects a region', async () => {
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:9): Prettier can’t format this HTML: Bad tag',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (3:9). Prettier can’t format this HTML:\n\nBad tag',
 			],
 		],
 		output: '<p>foo</p>\n\n<div   ><x-bad>bar</x-bad></div>\n',
@@ -868,7 +870,7 @@ test('leaves corrections out of rejected regions', async () => {
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:5): Close `<b>` with `</b>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:5). Close `<b>` with `</b>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: 'foo <b>bar</img>\n',
@@ -883,10 +885,10 @@ test('decides corrections again after a layout attempt rejects a region they dep
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Prettier can’t format this HTML: Failed to print',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Prettier can’t format this HTML:\n\nFailed to print',
 			],
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (7:1): No opening `<div>` matches this `</div>` in the same Markdown region.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (7:1). No opening `<div>` matches this `</div>` in the same Markdown region.',
 			],
 		],
 		output: input,
@@ -899,7 +901,7 @@ test('restores inline HTML that a correction removed when a later layout attempt
 	await expect(formatWithNotices(input, [])).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Formatting would leave this tag alone on the paragraph’s first line, where Prettier or GitHub Flavored Markdown would read it as an HTML block.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Formatting would leave this tag alone on the paragraph’s first line, where Prettier or GitHub Flavored Markdown would read it as an HTML block.',
 			],
 		],
 		output: input,
@@ -941,7 +943,7 @@ test('formats the HTML outside a container whose layout fails', async () => {
 	);
 	expect(warn.mock.calls).toStrictEqual([
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (4:3): After formatting, this HTML block would remain open in GitHub Flavored Markdown and include the Markdown that follows.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (4:3). After formatting, this HTML block would remain open in GitHub Flavored Markdown and include the Markdown that follows.',
 		],
 	]);
 });

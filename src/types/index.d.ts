@@ -366,13 +366,7 @@ export namespace Regions {
 				position: AST.Point;
 		  }
 		| {
-				construct:
-					| 'comment'
-					| 'incomplete-tag'
-					| 'math'
-					| 'pre'
-					| 'raw-text'
-					| 'svg';
+				construct: 'comment' | 'incomplete-tag' | 'math' | 'svg';
 				kind: 'split-construct';
 				position: AST.Point;
 		  }
@@ -382,6 +376,7 @@ export namespace Regions {
 					| 'crossed-protection'
 					| 'inline-foreign'
 					| 'self-closing'
+					| 'split-element'
 					| 'unclosed-element';
 				position: AST.Point;
 		  }

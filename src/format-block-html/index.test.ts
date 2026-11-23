@@ -97,7 +97,7 @@ test('formats HTML after an ignore comment that trailing whitespace keeps from b
 	).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): Formatting would put this `prettier-ignore` comment on its own line and change which HTML it ignores on the next pass. Keep the HTML you want to ignore in one Markdown block, with a blank line after it.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). Formatting would put this `prettier-ignore` comment on its own line and change which HTML it ignores on the next pass. Keep the HTML you want to ignore in one Markdown block, with a blank line after it.',
 			],
 		],
 		output: '<!-- prettier-ignore -->\n\n<p>x</p>\n',
@@ -184,7 +184,7 @@ test('rejects elements that ignored fragments leave open', async () => {
 	await expect(formatWithNotices(input)).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (4:5): Close `<li>` with `</li>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (4:5). Close `<li>` with `</li>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: input,
@@ -198,7 +198,7 @@ test('rejects elements that end their HTML block open after HTML ignore directiv
 	await expect(formatWithNotices(input)).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:5): Close `<li>` with `</li>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:5). Close `<li>` with `</li>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: input,
@@ -229,7 +229,7 @@ test('rejects elements that close only through Prettier’s supplied closing tag
 	await expect(formatWithNotices(input)).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (4:1): Close `<rp>` with `</rp>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (4:1). Close `<rp>` with `</rp>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: input,
@@ -299,7 +299,7 @@ test('rejects HTML paragraphs that their HTML blocks leave open before footnote 
 	await expect(formatWithNotices(input)).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:17): Close `<p>` with `</p>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:17). Close `<p>` with `</p>` in the same Markdown region, or escape `<` as `&lt;` if the tag is meant as text.',
 			],
 		],
 		output: input,
@@ -323,7 +323,7 @@ test('rejects elements that close in HTML that a Markdown ignore directive prote
 	await expect(formatWithNotices(input)).resolves.toStrictEqual({
 		notices: [
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): An ignore directive covers only part of this `<DIV>` element. Keep the whole element inside or outside the ignored source.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). An ignore directive covers only part of this `<DIV>` element. Keep the whole element inside or outside the ignored source.',
 			],
 		],
 		output: input,
@@ -363,7 +363,7 @@ test.each(['<!-- bar -->', '<!-- bar --><!-- foo -->'])(
 		expect(output).toBe('<!-- foo -->\n\n<div>baz</div>\n');
 		expect(warn.mock.calls).toStrictEqual([
 			[
-				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): The plugin can’t restore the Markdown between these HTML blocks to its original place after Prettier formats the HTML.',
+				'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). The plugin can’t restore the Markdown between these HTML blocks to its original place after Prettier formats the HTML.',
 			],
 		]);
 	}
@@ -410,7 +410,7 @@ test('rejects a region whose Markdown markers the configured HTML printer reorde
 	expect(output).toBe(input);
 	expect(warn.mock.calls).toStrictEqual([
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): The plugin can’t restore the Markdown between these HTML blocks to its original place after Prettier formats the HTML.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). The plugin can’t restore the Markdown between these HTML blocks to its original place after Prettier formats the HTML.',
 		],
 	]);
 });

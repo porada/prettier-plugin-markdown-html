@@ -22,7 +22,6 @@ export default async function formatHTML(
 	} catch (error: unknown) {
 		reportFormatterFailure({
 			cause: error,
-			filepath: options?.filepath,
 			position,
 		});
 	}
@@ -41,7 +40,6 @@ export async function checkFormattedHTML(
 	} catch (error: unknown) {
 		reportFormatterFailure({
 			cause: error,
-			filepath: options?.filepath,
 			position,
 		});
 	}

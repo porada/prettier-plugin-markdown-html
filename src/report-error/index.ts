@@ -2,9 +2,9 @@ import type { AST } from '../types/index.d.ts';
 
 type ErrorDetails = {
 	cause?: unknown;
-	filepath?: string | undefined;
 	position?: AST.Point | undefined;
-	reason: string;
+	reason?: string;
+	vendorMessage?: string;
 };
 
 const PLUGIN_PREFIX = '[prettier-plugin-markdown-html]';
@@ -12,31 +12,56 @@ const PLUGIN_PREFIX = '[prettier-plugin-markdown-html]';
 // Errors that report a failure of Prettier’s HTML formatter
 const formatterFailures = new WeakSet<Error>();
 
+// The plugin’s explanation of a rejected layout, without its location
+const layoutReasons = new WeakMap<Error, string>();
+
 /**
  * Reports a layout error when formatting would change how the Markdown reads.
  */
-export function reportUnsafeLayout(details: ErrorDetails): never {
-	throw createError(Error, 'Unsafe Markdown layout', details);
+export function reportUnsafeLayout(
+	details: ErrorDetails & { reason: string }
+): never {
+	const error = createError(Error, 'Unsafe Markdown layout', details);
+	layoutReasons.set(error, details.reason);
+	throw error;
+}
+
+/**
+ * Returns the plugin’s explanation when a layout error rejects a region.
+ */
+export function getLayoutReason(error: unknown): string | undefined {
+	return error instanceof Error ? layoutReasons.get(error) : undefined;
+}
+
+/**
+ * Returns the HTML formatter’s diagnostic without a position or code frame
+ * relative to the HTML fragment.
+ */
+export function describeFormatterError(cause: unknown): string {
+	const message = cause instanceof Error ? cause.message : String(cause);
+	const frame =
+		cause instanceof Error && 'codeFrame' in cause
+			? cause.codeFrame
+			: undefined;
+	const description =
+		typeof frame === 'string' && message.endsWith(`\n${frame}`)
+			? message.slice(0, -frame.length - 1)
+			: message;
+	const [diagnostic] = description.split(/\r?\n(?=[ \t]*>?[ \t]*\d+ \|)/, 1);
+	return diagnostic!.replace(/[ \t]*\(\d+:\d+\)$/m, '');
 }
 
 /**
  * Throws an error for a failure of Prettier’s HTML formatter.
  */
 export function reportFormatterFailure(
-	details: Omit<ErrorDetails, 'reason'>
+	details: Pick<ErrorDetails, 'cause' | 'position'>
 ): never {
 	const { cause } = details;
-
-	// Prettier’s code frame and position refer to the HTML that the plugin
-	// formats, not the Markdown
-	const reason = (cause instanceof Error ? cause.message : String(cause))
-		.split('\n', 1)[0]!
-		.replace(/\s*\(\d+:\d+\)$/, '');
-
 	const error = createError(
 		cause instanceof SyntaxError ? SyntaxError : Error,
 		'Failed to format HTML with Prettier',
-		{ ...details, reason }
+		{ ...details, vendorMessage: describeFormatterError(cause) }
 	);
 
 	formatterFailures.add(error);
@@ -56,42 +81,38 @@ export function isFormatterFailure(error: unknown): error is Error {
  */
 export function reportUnsupportedASTFormat({
 	expected,
-	filepath,
 	name,
 	received,
 }: {
 	expected: string;
-	filepath?: string | undefined;
 	name: string;
 	received: string | undefined;
 }): never {
-	const location = filepath ? ` while formatting \`${filepath}\`` : '';
-
 	throw new TypeError(
-		`${PLUGIN_PREFIX} Unsupported AST format for the \`${name}\` parser. Expected \`${expected}\`, received \`${received}\`${location}`
+		`${PLUGIN_PREFIX} Unsupported AST format for the \`${name}\` parser. Expected \`${expected}\`, received \`${received}\``
 	);
 }
 
 /**
- * Describes a region that falls back to plain Prettier, for a notice.
+ * Describes a rejected region and names its Markdown file when supplied.
  */
-export function describeRejectedRegion(details: ErrorDetails): string {
-	return createMessage('Skipped HTML formatting', details).replace(
-		':\n\n',
-		': '
-	);
+export function describeRejectedRegion(
+	details: ErrorDetails,
+	filepath?: string
+): string {
+	return createMessage('Skipped HTML formatting', details, filepath);
 }
 
 /**
  * Reports a region’s fallback to plain Prettier as an error in debug mode.
  */
 export function reportRejectedRegion(details: ErrorDetails): never {
-	throw createError(Error, 'PRETTIER_DEBUG stopped formatting', details);
+	throw createError(Error, '`PRETTIER_DEBUG` stopped formatting', details);
 }
 
 /**
- * Creates an error that names the plugin, includes any supplied file and
- * original Markdown position, and keeps any underlying error as its cause.
+ * Retains the underlying error and exposes the original Markdown position
+ * to Prettier when available.
  */
 function createError(
 	ErrorClass:
@@ -114,12 +135,13 @@ function createError(
 }
 
 /**
- * Creates a message that names the plugin and includes any supplied file and
- * original Markdown position.
+ * Keeps the plugin’s explanation on one line and separates a vendor diagnostic
+ * from it with a blank line.
  */
 function createMessage(
 	summary: string,
-	{ filepath, position, reason }: ErrorDetails
+	{ position, reason, vendorMessage }: ErrorDetails,
+	filepath?: string
 ): string {
 	let message = `${PLUGIN_PREFIX} ${summary}`;
 
@@ -131,5 +153,13 @@ function createMessage(
 		message += ` (${position.line}:${position.column})`;
 	}
 
-	return `${message}:\n\n${reason}`;
+	if (reason) {
+		message += `. ${reason}`;
+	}
+
+	if (vendorMessage) {
+		message += `:\n\n${vendorMessage}`;
+	}
+
+	return message;
 }

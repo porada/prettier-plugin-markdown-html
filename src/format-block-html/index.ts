@@ -114,14 +114,13 @@ export default async function formatBlockHTML(
 	const finalValues = new Map<AST.HTMLNode, string>();
 
 	for (const [node, aligned] of values) {
-		const value = finishLayout(scope, node, aligned, values, options);
+		const value = finishLayout(scope, node, aligned, values);
 
-		checkIgnoreComment(scope, node, value, options);
+		checkIgnoreComment(scope, node, value);
 		checkHTMLBlocks(
 			node,
 			value,
-			scope.endsOpenBlocks && scope.children.at(-1) === node,
-			options
+			scope.endsOpenBlocks && scope.children.at(-1) === node
 		);
 		finalValues.set(node, value);
 	}
@@ -177,14 +176,11 @@ function finishLayout(
 	scope: AST.BlockScope,
 	node: AST.HTMLNode,
 	aligned: string,
-	values: ReadonlyMap<AST.HTMLNode, string>,
-	options: ParserOptions
+	values: ReadonlyMap<AST.HTMLNode, string>
 ): string {
 	const takenIn = findTakenInContent(scope, node, values);
 
-	return takenIn
-		? endBlockOnLastLine(node, aligned, takenIn, options)
-		: aligned;
+	return takenIn ? endBlockOnLastLine(node, aligned, takenIn) : aligned;
 }
 
 /**
@@ -235,15 +231,14 @@ async function formatSkeleton(
 					: markers[markerIndex]?.start;
 
 			if (end === undefined) {
-				reportMisplacedMarkdown(scope, options);
+				reportMisplacedMarkdown(scope);
 			}
 
 			values.set(
 				piece.node,
 				removeAddedBlankLines(
 					formatted.slice(offset, end).trim(),
-					piece.node,
-					options
+					piece.node
 				)
 			);
 			offset = end;
@@ -253,7 +248,7 @@ async function formatSkeleton(
 		const match = markers[markerIndex];
 
 		if (match?.id !== piece.id) {
-			reportMisplacedMarkdown(scope, options);
+			reportMisplacedMarkdown(scope);
 		}
 
 		offset = match.end;
@@ -594,11 +589,7 @@ export function getScopeOptions(
  * Removes new blank lines that would end the block, except in raw text and
  * preformatted content. Throws if removing a blank line would change markup.
  */
-function removeAddedBlankLines(
-	value: string,
-	node: AST.HTMLNode,
-	options: ParserOptions
-): string {
+function removeAddedBlankLines(value: string, node: AST.HTMLNode): string {
 	if (/\n[\t ]*\n/.test(node.value)) {
 		return value;
 	}
@@ -614,7 +605,6 @@ function removeAddedBlankLines(
 
 			if (token && token.kind !== 'preserved') {
 				reportUnsafeLayout({
-					filepath: options.filepath,
 					position: node.position?.start,
 					reason: 'Removing the blank line that Prettier’s HTML formatter adds would change a comment or other markup.',
 				});
@@ -817,13 +807,11 @@ function findTakenInSiblings(
 function checkIgnoreComment(
 	scope: AST.BlockScope,
 	node: AST.HTMLNode,
-	value: string,
-	options: ParserOptions
+	value: string
 ): void {
 	/* v8 ignore next -- @preserve */
 	if (value !== node.value && scope.activeIgnoreComments.has(node)) {
 		reportUnsafeLayout({
-			filepath: options.filepath,
 			position: node.position?.start,
 			reason: 'After formatting, this Prettier ignore comment would share its HTML block with other HTML, so Prettier would no longer recognize it.',
 		});
@@ -1105,8 +1093,7 @@ async function checkNextPass(
 										next,
 										block,
 										values.get(block)!,
-										values,
-										options
+										values
 									)
 						}${separator}`
 				)
@@ -1129,7 +1116,6 @@ async function checkNextPass(
 		}
 
 		reportUnsafeLayout({
-			filepath: options.filepath,
 			position: culprit.position?.start,
 			reason,
 		});
@@ -1159,8 +1145,7 @@ function isPrintedOnNextLine(
 function endBlockOnLastLine(
 	node: AST.HTMLNode,
 	value: string,
-	takenIn: TakenInContent,
-	options: ParserOptions
+	takenIn: TakenInContent
 ): string {
 	const lines = value.split('\n');
 	const start = findBlockStartLines(value).at(-1)!;
@@ -1176,7 +1161,6 @@ function endBlockOnLastLine(
 			.every((line) => CLOSING_TAGS_LINE_PATTERN.test(line))
 	) {
 		reportUnsafeLayout({
-			filepath: options.filepath,
 			position: node.position?.start,
 			reason: `After formatting, this HTML block would remain open in GitHub Flavored Markdown and ${TAKEN_IN_CONSEQUENCES[takenIn]}.`,
 		});
@@ -1319,8 +1303,7 @@ function joinTagLines(tag: string): string {
 function checkHTMLBlocks(
 	node: AST.HTMLNode,
 	value: string,
-	canStayOpen: boolean,
-	options: ParserOptions
+	canStayOpen: boolean
 ): void {
 	const source = readHTMLBlockText(node);
 
@@ -1328,7 +1311,6 @@ function checkHTMLBlocks(
 	// Markdown reads as paragraph text
 	if (!isHTMLBlockSequence(source, source)) {
 		reportUnsafeLayout({
-			filepath: options.filepath,
 			position: node.position?.start,
 			reason: 'GitHub Flavored Markdown reads this HTML as paragraph text. To start a block, put the first tag on its own line, separated from any preceding paragraph by a blank line.',
 		});
@@ -1345,7 +1327,6 @@ function checkHTMLBlocks(
 		/* v8 ignore stop -- @preserve */
 	) {
 		reportUnsafeLayout({
-			filepath: options.filepath,
 			position: node.position?.start,
 			// The formatted HTML still forms blocks, but one has a different
 			// end condition
@@ -1360,12 +1341,8 @@ function checkHTMLBlocks(
  * Reports an error when Prettier’s HTML output loses the place of the Markdown
  * between a scope’s HTML blocks.
  */
-function reportMisplacedMarkdown(
-	scope: AST.BlockScope,
-	options: ParserOptions
-): never {
+function reportMisplacedMarkdown(scope: AST.BlockScope): never {
 	reportUnsafeLayout({
-		filepath: options.filepath,
 		position: scope.children.find(isHTMLNode)?.position?.start,
 		reason: 'The plugin can’t restore the Markdown between these HTML blocks to its original place after Prettier formats the HTML.',
 	});

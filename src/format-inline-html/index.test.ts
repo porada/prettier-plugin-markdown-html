@@ -309,7 +309,7 @@ test('rejects paragraphs whose wrapping would open a math block on a later line'
 	expect(output).toBe(await format(input, { ...options, plugins: [] }));
 	expect(warn.mock.calls).toStrictEqual([
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1): The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:1). The formatted text wouldn’t read as a single Markdown paragraph with inline HTML. Check for a tag or Markdown block marker at the start of a line.',
 		],
 	]);
 });
@@ -480,7 +480,7 @@ test('keeps inline tags as written when an enclosing pre spans HTML blocks', asy
 	await expect(format(input, options)).resolves.toBe(input);
 	expect(warn.mock.calls).toStrictEqual([
 		[
-			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:6): Keep `<pre>` and `</pre>` together in one HTML block.',
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (1:6). Keep `<pre>` and `</pre>` together in one HTML block.',
 		],
 	]);
 });

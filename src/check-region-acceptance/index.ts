@@ -129,16 +129,12 @@ function findTagProblems(region: Regions.Region): Regions.Problem[] {
 
 		const isPreformatted = element.name === 'pre' && !element.isForeign;
 		const endFragment = findEndFragment(element);
-		let construct: 'pre' | 'raw-text' | undefined;
 
-		if (isPreformatted) {
-			construct = 'pre';
-		} else if (isRawTextTag(element.name)) {
-			construct = 'raw-text';
-		}
-
-		if (construct && endFragment !== opening.fragment) {
-			problems.push({ construct, kind: 'split-construct', position });
+		if (
+			(isPreformatted || isRawTextTag(element.name)) &&
+			endFragment !== opening.fragment
+		) {
+			problems.push({ element, kind: 'split-element', position });
 		}
 
 		// Foreign content can’t span Markdown or end at another element’s

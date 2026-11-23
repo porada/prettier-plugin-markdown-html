@@ -3,7 +3,9 @@ import type { Rejection } from '../decide-regions/index.ts';
 import type { Regions } from '../types/index.d.ts';
 import { HTML_WHITESPACE } from '../constants/index.ts';
 import {
+	describeFormatterError,
 	describeRejectedRegion,
+	getLayoutReason,
 	reportRejectedRegion,
 } from '../report-error/index.ts';
 
@@ -17,8 +19,6 @@ const CONSTRUCT_DESCRIPTIONS: Readonly<
 	'incomplete-tag':
 		'Complete this tag, including any quoted attribute values, in the same HTML fragment.',
 	'math': 'Close `<math>` with `</math>` in the same HTML block, before any enclosing element closes.',
-	'pre': 'Keep `<pre>` and `</pre>` together in one HTML block.',
-	'raw-text': 'Keep both tags of this raw text element in one HTML block.',
 	'svg': 'Close `<svg>` with `</svg>` in the same HTML block, before any enclosing element closes.',
 };
 
@@ -64,14 +64,14 @@ export default function reportNotices(
 		(globalThis as { process?: { env?: Record<string, unknown> } }).process
 			?.env?.PRETTIER_DEBUG
 	) {
-		reportRejectedRegion(describeProblem(first.problem, filepath));
+		reportRejectedRegion(describeProblem(first.problem));
 	}
 
 	for (const { problem } of notices.slice(0, MAX_LISTED_NOTICES)) {
 		// Notices go to standard error, as Prettier’s own warnings do
 		/* oxlint-disable-next-line eslint/no-console */
 		console.warn(
-			describeRejectedRegion(describeProblem(problem, filepath))
+			describeRejectedRegion(describeProblem(problem), filepath)
 		);
 	}
 
@@ -80,10 +80,12 @@ export default function reportNotices(
 	if (remaining > 0) {
 		/* oxlint-disable-next-line eslint/no-console */
 		console.warn(
-			describeRejectedRegion({
-				filepath,
-				reason: `${remaining} more ${remaining === 1 ? 'region' : 'regions'}.`,
-			})
+			describeRejectedRegion(
+				{
+					reason: `${remaining} more ${remaining === 1 ? 'region' : 'regions'}.`,
+				},
+				filepath
+			)
 		);
 	}
 }
@@ -92,98 +94,89 @@ export default function reportNotices(
  * Gives the details of a rejection: where it starts in the original Markdown,
  * why the region falls back to plain Prettier, and any underlying error.
  */
-function describeProblem(
-	problem: Rejection,
-	filepath: string | undefined
-): {
+function describeProblem(problem: Rejection): {
 	cause?: unknown;
-	filepath: string | undefined;
 	position: Rejection['position'];
-	reason: string;
+	reason?: string;
+	vendorMessage?: string;
 } {
 	const { position } = problem;
 
 	switch (problem.kind) {
 		case 'changed-role':
 			return {
-				filepath,
 				position,
 				reason: 'Formatting would change whether Prettier reads this as inline HTML, an HTML block, or text. Check nearby line breaks, indentation, and code fences.',
 			};
 
 		case 'crossed-protection':
 			return {
-				filepath,
 				position,
 				reason: `An ignore directive covers only part of this \`<${problem.element.opening.sourceName}>\` element. Keep the whole element inside or outside the ignored source.`,
 			};
 
 		case 'escaped-pipe':
 			return {
-				filepath,
 				position,
 				reason: 'The raw HTML in this table cell contains an escaped pipe (`\\|`).',
 			};
 
 		case 'inline-foreign':
 			return {
-				filepath,
 				position,
 				reason: `To format this inline \`<${problem.element.opening.sourceName}>\`, put the whole element in one HTML block.`,
 			};
 
 		case 'moved-block':
 			return {
-				filepath,
 				position,
 				reason: 'Prettier’s Markdown layout would change how this HTML block is nested in lists or block quotes.',
 			};
 
 		case 'moved-ignore-comment':
 			return {
-				filepath,
 				position,
 				reason: 'Formatting would put this `prettier-ignore` comment on its own line and change which HTML it ignores on the next pass. Keep the HTML you want to ignore in one Markdown block, with a blank line after it.',
 			};
 
 		case 'open-block':
 			return {
-				filepath,
 				position,
 				reason: 'Formatting would make the next line of Markdown part of this HTML block. Add a blank line after the block.',
 			};
 
 		case 'reindented-block':
 			return {
-				filepath,
 				position,
 				reason: 'Prettier’s Markdown layout would change the indentation inside the formatted HTML block.',
 			};
 
 		case 'self-closing':
 			return {
-				filepath,
 				position,
-				reason: `HTML leaves \`<${problem.element.opening.sourceName}/>\` open. Use \`<${problem.element.opening.sourceName}>\` and \`</${problem.element.opening.sourceName}>\`.`,
+				reason: `HTML doesn’t support self-closing syntax for \`<${problem.element.opening.sourceName}>\`. Use an explicit closing tag \`</${problem.element.opening.sourceName}>\`.`,
+			};
+
+		case 'split-element':
+			return {
+				position,
+				reason: `Keep \`<${problem.element.opening.sourceName}>\` and \`</${problem.element.opening.sourceName}>\` together in one HTML block.`,
 			};
 
 		case 'split-construct':
 			return {
-				filepath,
 				position,
 				reason: CONSTRUCT_DESCRIPTIONS[problem.construct],
 			};
 
 		case 'unclosed-element':
 			return {
-				filepath,
 				position,
 				reason: `Close \`<${problem.element.opening.sourceName}>\` with \`</${problem.element.opening.sourceName}>\` in the same Markdown region, or escape \`<\` as \`&lt;\` if the tag is meant as text.`,
 			};
 
 		case 'unmarkable':
 			return {
-				filepath,
 				position,
 				reason: 'The plugin can’t check this document’s HTML layout because every character it can use as a marker already appears in the text.',
 			};
@@ -195,7 +188,6 @@ function describeProblem(
 				.replaceAll(WHITESPACE_PATTERN, ' ');
 
 			return {
-				filepath,
 				position,
 				reason: `No opening \`<${sourceName}>\` matches this \`${tag}\` in the same Markdown region.`,
 			};
@@ -203,44 +195,29 @@ function describeProblem(
 
 		case 'unsupported-construct':
 			return {
-				filepath,
 				position,
 				reason: `This region contains ${UNSUPPORTED_CONSTRUCT_NAMES[problem.construct]}, which the plugin doesn’t support.`,
 			};
 
-		default:
+		case 'unsafe-layout': {
+			const { cause } = problem;
+			const reason = getLayoutReason(cause);
+
+			if (reason !== undefined) {
+				return { cause, position, reason };
+			}
+
+			const vendorMessage =
+				cause instanceof Error ? cause.message : String(cause);
+			return { cause, position, vendorMessage };
+		}
+
+		case 'unformattable':
 			return {
 				cause: problem.cause,
-				filepath,
 				position,
-				reason: describeCause(problem),
+				reason: 'Prettier can’t format this HTML',
+				vendorMessage: describeFormatterError(problem.cause),
 			};
 	}
-}
-
-/**
- * Describes the error behind a region whose HTML Prettier can’t format or whose
- * layout can’t preserve the document.
- */
-function describeCause(
-	problem: Extract<Rejection, { cause: unknown }>
-): string {
-	const message =
-		problem.cause instanceof Error
-			? problem.cause.message
-			: String(problem.cause);
-
-	// A layout error’s reason follows the plugin’s summary, and Prettier’s
-	// first line names the error without its code frame
-	const summaryEnd = message.indexOf('\n\n');
-	const reason =
-		problem.kind === 'unsafe-layout'
-			? message
-					.slice(summaryEnd === -1 ? 0 : summaryEnd + 2)
-					.split('\n', 1)[0]!
-			: message.split('\n', 1)[0]!.replace(/\s*\(\d+:\d+\)$/, '');
-
-	return problem.kind === 'unsafe-layout'
-		? reason
-		: `Prettier can’t format this HTML: ${reason}`;
 }

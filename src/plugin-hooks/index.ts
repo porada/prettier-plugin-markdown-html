@@ -26,7 +26,6 @@ type ParserOptionsWithDelegation = ParserOptions & {
 
 type ParserResolverState = {
 	entryOptions: NonNullable<ResolvedPriorParser['entryOptions']>;
-	filepath: string | undefined;
 	lifecycleState: ResolvedPriorParser['lifecycleState'];
 	name: string;
 	parserByPluginIndex: Map<number, Promise<Parser>>;
@@ -163,7 +162,6 @@ export function createPriorParserResolver(
 
 		if (!state) {
 			state = {
-				filepath: options.filepath,
 				entryOptions: {
 					locEnd: currentParser.locEnd,
 					locStart: currentParser.locStart,
@@ -353,14 +351,13 @@ async function initializeParser(
  * Throws when a parser’s AST format is incompatible with this plugin.
  */
 function assertCompatibleParser(
-	{ filepath, name }: ParserResolverState,
+	{ name }: ParserResolverState,
 	parser: Parser,
 	expectedAstFormat: string
 ): void {
 	if (parser.astFormat !== expectedAstFormat) {
 		reportUnsupportedASTFormat({
 			expected: expectedAstFormat,
-			filepath,
 			name,
 			received: parser.astFormat,
 		});

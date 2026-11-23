@@ -603,7 +603,7 @@ Each formatting operation reports rejections once, in document order. A notice i
 
 Notices have no effect on the result and no option of their own. When a region causes a notice, fixing its HTML or protecting the entire region with an [ignore directive](#ignore-directives) clears that notice.
 
-When the `PRETTIER_DEBUG` environment variable is non-empty, the first rejection that would produce a notice raises an error with the same details and formatting returns no result. This follows Prettier’s debugging convention for embedded code. A [plain Prettier error](#errors) takes precedence.
+When the `PRETTIER_DEBUG` environment variable is non-empty, the plugin throws an error in place of the first notice and returns no formatted document. The error gives the same reason and Markdown position as the notice. This follows Prettier’s debugging convention for embedded code. A [plain Prettier error](#errors) takes precedence.
 
 ## Formatting Controls
 
@@ -736,7 +736,7 @@ An error that plain Prettier raises for the same input and options takes precede
 
 When the plugin can attribute an HTML failure to one region, it rejects that region, even when its own work caused the failure. Otherwise it rejects every region the failure may involve. The set of regions affected by such a failure is unspecified. In either case, the plugin reports rejections as described in [Notices](#notices).
 
-The plugin raises its own error only if a [compatibility check](#supported-syntax) fails or debug mode turns a notice into an error. Each such error identifies the plugin, includes the file path if supplied, and retains any underlying error as its cause. Positions, when available, refer to the original Markdown.
+The plugin raises its own error only if a [compatibility check](#supported-syntax) fails or debug mode turns a notice into an error. Each such error identifies the plugin and retains any underlying error as its cause. Positions, when available, refer to the original Markdown.
 
 ### Settings
 
