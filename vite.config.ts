@@ -19,6 +19,7 @@ export default defineConfig({
 				100: true,
 			},
 		},
+		silent: 'passed-only',
 		typecheck: {
 			enabled: true,
 		},

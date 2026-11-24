@@ -730,11 +730,6 @@ test('removes properties that a failed layout added before trying again', async 
 	const root = (await markdownParsers.markdown.parse(input, {
 		originalText: input,
 	} as ParserOptions)) as AST.Node;
-	const warn = vi.spyOn(console, 'warn').mockReturnValue(undefined);
-
-	onTestFinished(() => {
-		warn.mockRestore();
-	});
 
 	await preprocess(root, { ...OPTIONS, originalText: input });
 
