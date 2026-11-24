@@ -219,3 +219,21 @@ test('separates an unexpected layout failure from the notice', () => {
 		],
 	]);
 });
+
+test('separates a layout failure thrown as a string from the notice', () => {
+	expect(
+		reportWithWarnings([
+			{
+				problem: {
+					cause: 'Foo',
+					kind: 'unsafe-layout',
+					position: POSITION,
+				},
+			},
+		])
+	).toStrictEqual([
+		[
+			'[prettier-plugin-markdown-html] Skipped HTML formatting (3:2):\n\nFoo',
+		],
+	]);
+});
